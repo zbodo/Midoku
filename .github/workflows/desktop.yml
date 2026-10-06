@@ -1,0 +1,34 @@
+name: macOS Desktop
+
+on:
+  pull_request:
+    paths: ["Desktop/**", "Midoku.xcodeproj/**", ".github/workflows/desktop.yml"]
+  push:
+    branches: [main]
+    paths: ["Desktop/**", "Midoku.xcodeproj/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+jobs:
+  core:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test portable desktop core
+        run: swift test --package-path Desktop/Core
+  desktop:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and test native app
+        run: |
+          xcodebuild -project Midoku.xcodeproj -scheme Midoku \
+            -destination 'platform=macOS' -derivedDataPath build/Desktop \
+            -skipPackagePluginValidation -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO test
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-test-results
+          path: build/Desktop/Logs/Test/*.xcresult
+          if-no-files-found: ignore

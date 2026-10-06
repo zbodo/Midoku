@@ -1,8 +1,6 @@
-name: Update AltStore Source
+name: Legacy AltStore Source (manual only)
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:  # Allow manual trigger
 
 jobs:

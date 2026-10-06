@@ -20,3 +20,7 @@ build/
 
 # Xcode-Build-Server
 buildServer.json
+
+# Native desktop Swift package
+Desktop/Core/.build/
+Desktop/Core/.swiftpm/
