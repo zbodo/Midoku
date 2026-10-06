@@ -10,7 +10,6 @@ jobs:
     runs-on: xcode-27
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
-      SIGNING_KEYCHAIN: ${{ runner.temp }}/midoku-${{ github.run_id }}-${{ github.run_attempt }}.keychain-db
     steps:
       - uses: actions/checkout@v5
       - name: Show build environment
@@ -18,6 +17,9 @@ jobs:
           sw_vers
           xcodebuild -version
           xcrun swift --version
+      - name: Prepare signing keychain path
+        run: |
+          echo "SIGNING_KEYCHAIN=$RUNNER_TEMP/midoku-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.keychain-db" >> "$GITHUB_ENV"
       - name: Import Developer ID certificate
         id: signing
         shell: bash
