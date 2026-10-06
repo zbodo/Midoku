@@ -46,7 +46,10 @@ Run workflow**, select the branch containing the change, and run it. Download
 branches containing this workflow require these secrets.
 
 The workflow imports the identity into a temporary, randomly password-protected
-keychain and explicitly selects it for signing. It uses manual signing with
+keychain and explicitly selects it for signing. It also adds that keychain to
+the user search list so Xcode can discover the identity before invoking
+codesign, preserving and restoring the original search list during cleanup.
+It uses manual signing with
 Hardened Runtime and a secure timestamp, preserving the project's sandbox
 entitlements. It verifies the signature and Team ID before packaging, and
 deletes the temporary P12 and keychain even when a build fails. No provisioning

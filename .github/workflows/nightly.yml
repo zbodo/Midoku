@@ -54,6 +54,25 @@ jobs:
             echo '::error::The P12 must contain exactly one valid Developer ID Application identity, including its private key, matching APPLE_TEAM_ID.'
             exit 1
           fi
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import shlex
+          import subprocess
+
+          keychain = os.environ["SIGNING_KEYCHAIN"]
+          original = shlex.split(subprocess.check_output(
+              ["security", "list-keychains", "-d", "user"], text=True))
+          Path(keychain + ".search-list.json").write_text(json.dumps(original))
+          subprocess.run(
+              ["security", "list-keychains", "-d", "user", "-s", keychain, *original],
+              check=True)
+          PY
+          if ! security find-identity -v -p codesigning | grep -F "$identity" >/dev/null; then
+            echo '::error::The imported signing identity is not discoverable through the user keychain search list.'
+            exit 1
+          fi
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
       - name: Build signed app
         env:
@@ -108,7 +127,23 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [[ -f "$SIGNING_KEYCHAIN" ]]; then
-            security delete-keychain "$SIGNING_KEYCHAIN"
+          cleanup_status=0
+          if [[ -f "$SIGNING_KEYCHAIN.search-list.json" ]]; then
+            python3 - <<'PY' || cleanup_status=$?
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          original = json.loads(Path(
+              os.environ["SIGNING_KEYCHAIN"] + ".search-list.json").read_text())
+          subprocess.run(
+              ["security", "list-keychains", "-d", "user", "-s", *original],
+              check=True)
+          PY
           fi
-          rm -f "$RUNNER_TEMP/midoku-signing.p12"
+          if [[ -f "$SIGNING_KEYCHAIN" ]]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || cleanup_status=$?
+          fi
+          rm -f "$RUNNER_TEMP/midoku-signing.p12" "$SIGNING_KEYCHAIN.search-list.json"
+          exit "$cleanup_status"
