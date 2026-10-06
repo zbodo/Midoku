@@ -48,6 +48,8 @@ final class SourceIntegrationTests: XCTestCase {
         let library = LibraryStore(root: root)
         let sources = SourceStore(root: root.appendingPathComponent("Sources"))
         let id = try await sources.openChapter(source: source, manga: manga, chapter: chapter, library: library)
+        XCTAssertTrue(library.shelfBooks.isEmpty, "Opening a chapter must not automatically add the manga")
+        library.addManga(source: source.key, key: manga.key, title: manga.title, cover: manga.cover)
         let book = try XCTUnwrap(library.book(id))
         for index in book.pages.indices {
             let url = try XCTUnwrap(library.pageURL(for: book, at: index))
@@ -66,6 +68,41 @@ final class SourceIntegrationTests: XCTestCase {
         let restoredBook = try XCTUnwrap(restored.book(id))
         try await sources.prepare(restoredBook, library: restored)
         XCTAssertEqual(restoredBook.online?.chapterKey, chapter.key)
+        let shelf = try XCTUnwrap(restored.shelfBooks.first)
+        XCTAssertEqual(shelf.title, manga.title)
+        XCTAssertEqual(shelf.readingBook?.id, id)
+        restored.updateShelfBook(shelf.id) { $0.isFavorite = true; $0.collection = "Comics" }
+        let secondID = try await sources.openChapter(
+            source: source, manga: manga, chapter: .init(key: "chapter-2", chapterNumber: 2), library: restored)
+        restored.saveProgress(secondID, page: 1, finished: true, offset: 0.5)
+        var fullManga = manga
+        fullManga.chapters = [.init(key: "chapter-3", chapterNumber: 3),
+                              .init(key: "chapter-2", chapterNumber: 2), chapter]
+        restored.synchronizeManga(fullManga, source: source.key)
+        XCTAssertEqual(restored.mangaRecord(source: source.key, key: manga.key)?.chapterRecord("chapter-2")?.pageOffset, 0.5)
+        XCTAssertEqual(restored.books.count, 2)
+        XCTAssertEqual(restored.shelfBooks.count, 1)
+        XCTAssertEqual(restored.shelfBooks.first?.id, shelf.id)
+        XCTAssertEqual(restored.shelfBooks.first?.readingBook?.id, secondID)
+        XCTAssertEqual(restored.shelfBooks.first?.readingBook?.pageOffset, 0.5)
+        XCTAssertFalse(restored.shelfBooks.first?.isRead ?? true)
+        let reopened = LibraryStore(root: root)
+        XCTAssertTrue(reopened.shelfBooks.first?.isFavorite ?? false)
+        XCTAssertEqual(reopened.shelfBooks.first?.collection, "Comics")
+        reopened.remove([shelf.id])
+        XCTAssertEqual(reopened.books.count, 2)
+        XCTAssertTrue(reopened.shelfBooks.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(id.uuidString).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(secondID.uuidString).path))
+        reopened.addManga(source: source.key, key: manga.key, title: manga.title, cover: manga.cover)
+        XCTAssertEqual(reopened.shelfBooks.first?.id, shelf.id)
+        XCTAssertEqual(reopened.shelfBooks.first?.unreadCount, 1)
+        XCTAssertTrue(reopened.shelfBooks.first?.isFavorite ?? false)
+        XCTAssertEqual(reopened.shelfBooks.first?.categories, ["Comics"])
+        XCTAssertEqual(reopened.continuation(source: source.key, manga: manga.key, resumeLastOpened: false)?.key, "chapter-3")
+        reopened.markChapters([shelf.id], read: false)
+        XCTAssertEqual(reopened.shelfBooks.first?.unreadCount, 3)
+        XCTAssertFalse(reopened.book(secondID)?.isRead ?? true)
     }
 
     func testModernPackageExtractionRejectsTraversalAndLegacyLayout() throws {

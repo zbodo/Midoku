@@ -32,9 +32,13 @@ that the app and its dependencies were built for matching architectures.
 3. Install a source from the repository. Select it in the source sidebar.
 4. Browse its home/listings or search; use Search Filters for genre, sort,
    inclusion/exclusion, text and numeric ranges. Open a cover for manga details.
-5. Select a chapter to open an independent reader. The chapter is retained on
-   the shelf with reading progress. The reader's Chapters button returns to the
-   series. Source-provided reading direction/webtoon layout is used initially.
+5. Choose Add to Library to put the whole manga on the shelf. Opening a chapter
+   saves chapter progress independently and does not automatically add the manga.
+   Shelf entries open details by default; Open Reader Directly can resume reading.
+   Continue Reading resumes the latest unfinished chapter, then the oldest unread
+   available chapter. Resume Last Opened Chapter can also resume completed chapters.
+   The reader's Chapters button returns to the series. Source-provided reading
+   direction/webtoon layout is used initially.
 
 **Only modern Aidoku repositories and ABI 0.7 WASM sources are supported.** The
 native app does not load the legacy ABI 0.6 runtime or array-shaped legacy
@@ -67,16 +71,23 @@ failed requests can be retried. Fully cached chapters open without contacting a
 source. Partial chapters refresh their page descriptors after restarting; if
 that fails, Read Cached Pages allows access to pages already on disk. This is
 an on-demand reading cache, with no background chapter-download queue or cache
-quota interface. Removing a chapter deletes its stored pages. Uninstalling a
-source preserves chapter records and cached images.
+quota interface. Removing a manga from the shelf preserves history and cached
+pages. Delete Downloads separately clears online chapter pages; removal also offers
+an explicit delete-pages option. Uninstalling a source preserves chapter records
+and cached images.
 
 ## Desktop controls
 
 - Import CBZ/ZIP, PDF, individual images or image folders with ⌘O, or drop files
   on the shelf. Imports own copies; PDFs are rasterized to images.
-- The adaptive shelf supports search, sorting, collections, favorites and an
-  inspector. Click selects; ⌘-click toggles; Shift-click selects a range.
-  Arrows navigate the grid, Return or double-click opens the reader.
+- The shelf supports multiple categories, an uncategorized view, title/author
+  search, eight sorts, ascending/descending order, unread/update pinning, filters,
+  unread/downloaded badges, grid/list views, favorites and an inspector.
+  Read/unread actions affect chapters; finishing one chapter does not finish the
+  series. Existing chapter shelf entries migrate into whole-manga entries while
+  preserving progress and cached files. Click selects; ⌘-click toggles; Shift-click
+  selects a range. Arrows navigate the grid, Return or double-click opens details
+  for online manga and the reader for local books.
 - Different chapters/books have independent, resizable reader windows. Closing
   one leaves the library and other readers open.
 - Adaptive paging chooses one, two or more pages from the available viewport
@@ -158,7 +169,7 @@ See [CI signing setup](CI_SIGNING.md).
 Notarization is not configured. Workflow definitions do not establish that CI
 has already passed.
 
-Development in the cloud uses Linux: **33 portable tests passed**; Swift syntax,
+Development in the cloud uses Linux: **57 portable tests passed**; Swift syntax,
 project references, property lists and workflow configuration were checked.
 The complete dependency graph also resolved successfully using the locked
 versions with `--force-resolved-versions`.

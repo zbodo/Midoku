@@ -1,4 +1,5 @@
 import AidokuRunner
+import MidokuCore
 import SwiftUI
 
 struct NativeMangaDetails: View {
@@ -19,6 +20,15 @@ struct NativeMangaDetails: View {
             query.isEmpty || $0.displayTitle.localizedCaseInsensitiveContains(query)
         }
         return ascending ? Array(values.reversed()) : values
+    }
+
+    @AppStorage("desktop.library.resumeLastOpened") private var resumeLastOpened = false
+    @State private var removing = false
+    @State private var starting = false
+
+    private var record: LibraryManga? { library.mangaRecord(source: link.sourceKey, key: link.mangaKey) }
+    private var nextChapter: LibraryChapter? {
+        library.continuation(source: link.sourceKey, manga: link.mangaKey, resumeLastOpened: resumeLastOpened)
     }
 
     var body: some View {
@@ -75,24 +85,54 @@ struct NativeMangaDetails: View {
                                 Image(systemName: "book")
                             }
                         }.padding(.vertical, 6).contentShape(Rectangle())
-                    }.buttonStyle(.plain).disabled(opening != nil)
+                    }.buttonStyle(.plain).disabled(opening != nil || starting)
+                    .contextMenu {
+                        let completed = library.aidokuChapterCompleted(source: link.sourceKey, manga: link.mangaKey, chapter: chapter.key)
+                        Button(completed ? "Mark Unread" : "Mark Read") {
+                            library.setChapterRead(source: link.sourceKey, manga: link.mangaKey, chapter: chapter.key, read: !completed)
+                        }
+                    }
                 }
                 if chapters.isEmpty { Text("No chapters available").foregroundStyle(.secondary).padding() }
             }
         }
         .navigationTitle(manga?.title ?? link.title)
         .toolbar {
-            Button {
-                Task { await refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }.disabled(loading)
-            Button {
-                openWindow(id: "source-web", value: link.sourceKey)
-            } label: {
-                Image(systemName: "globe")
-            }.help("Open Source Website / Sign In")
+            ToolbarItem {
+                if library.mangaOnShelf(source: link.sourceKey, key: link.mangaKey) == nil {
+                    Button("Add to Library") {
+                        library.addManga(source: link.sourceKey, key: link.mangaKey,
+                                         title: manga?.title ?? link.title, cover: manga?.cover ?? link.cover)
+                    }.disabled(library.loadFailed)
+                } else {
+                    Button("Remove from Library…") { removing = true }
+                }
+            }
+            ToolbarItem {
+                Button(nextChapter?.lastReadAt == nil ? "Start Reading" : "Continue Reading") { continueReading() }
+                    .disabled(starting || opening != nil || nextChapter == nil)
+                    .help(nextChapter?.title ?? String(localized: "All Chapters Read"))
+            }
+            ToolbarItem {
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }.disabled(loading)
+            }
+            ToolbarItem {
+                Button {
+                    openWindow(id: "source-web", value: link.sourceKey)
+                } label: {
+                    Image(systemName: "globe")
+                }.help("Open Source Website / Sign In")
+            }
         }
+        .confirmationDialog("Remove this manga from the library?", isPresented: $removing) {
+            Button("Remove from Library", role: .destructive) {
+                if let manga = library.mangaOnShelf(source: link.sourceKey, key: link.mangaKey) { library.remove([manga.id]) }
+            }
+        } message: { Text("Reading history and stored pages will be preserved.") }
         .task { await refresh() }
     }
 
@@ -101,7 +141,10 @@ struct NativeMangaDetails: View {
         loading = true
         error = nil
         defer { loading = false }
-        if manga == nil { manga = library.aidokuManga(source: link.sourceKey, key: link.mangaKey) }
+        if manga == nil {
+            manga = library.storedManga(source: link.sourceKey, key: link.mangaKey)
+                ?? library.aidokuManga(source: link.sourceKey, key: link.mangaKey)
+        }
         do {
             let runtime = try await sources.source(link.sourceKey)
             source = runtime
@@ -112,18 +155,43 @@ struct NativeMangaDetails: View {
             if var updated = manga {
                 library.applyAidokuMangaOverrides(to: &updated, source: link.sourceKey)
                 manga = updated
+                library.synchronizeManga(updated, source: link.sourceKey)
             }
         } catch { self.error = error.localizedDescription }
     }
 
+    private func continueReading() {
+        guard let record, !starting, opening == nil else { return }
+        starting = true; error = nil
+        Task {
+            defer { starting = false }
+            do {
+                if let id = try await sources.continueManga(record, library: library, resumeLastOpened: resumeLastOpened) {
+                    library.mangaOpened(record)
+                    openWindow(id: "reader", value: id)
+                }
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
     private func read(_ chapter: AidokuRunner.Chapter) {
-        guard let source, let manga, opening == nil else { return }
-        opening = chapter.key
-        error = nil
+        guard let manga, opening == nil, !starting else { return }
+        opening = chapter.key; error = nil
         Task {
             defer { opening = nil }
             do {
-                let id = try await sources.openChapter(source: source, manga: manga, chapter: chapter, library: library)
+                let id: UUID
+                if let existing = library.books.first(where: {
+                    $0.online?.sourceKey == link.sourceKey && $0.online?.mangaKey == link.mangaKey
+                        && $0.online?.chapterKey == chapter.key
+                }) {
+                    try await sources.prepare(existing, library: library)
+                    id = existing.id
+                } else {
+                    let runtime = try await sources.source(link.sourceKey)
+                    id = try await sources.openChapter(source: runtime, manga: manga, chapter: chapter, library: library)
+                }
+                if let record { library.mangaOpened(record) }
                 openWindow(id: "reader", value: id)
             } catch { self.error = error.localizedDescription }
         }

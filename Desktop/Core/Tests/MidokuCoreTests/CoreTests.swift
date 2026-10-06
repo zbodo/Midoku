@@ -231,7 +231,7 @@ final class PersistenceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("library.json")
         var snapshot = LibrarySnapshot()
-        snapshot.version = 2
+        snapshot.version = 999
         try LibraryPersistence.save(snapshot, to: file)
         XCTAssertThrowsError(try LibraryPersistence.load(from: file))
         snapshot.version = 1

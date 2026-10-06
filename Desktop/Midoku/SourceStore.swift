@@ -69,6 +69,7 @@ final class SourceStore: ObservableObject {
         source: AidokuRunner.Source, manga: AidokuRunner.Manga, chapter: AidokuRunner.Chapter,
         library: LibraryStore
     ) async throws -> UUID {
+        library.synchronizeManga(manga, source: source.key)
         let pages = try await source.getPageList(manga: manga, chapter: chapter)
         try Task.checkCancellation()
         guard !pages.isEmpty else { throw SourceFailure.noPages }
@@ -102,6 +103,36 @@ final class SourceStore: ObservableObject {
         guard library.book(book.id) == book else { throw CocoaError(.fileWriteUnknown) }
         await RemotePageCache.shared.register(book: book, source: source, pages: pages, root: library.root)
         return book.id
+    }
+
+    func refreshManga(_ record: LibraryManga, library: LibraryStore) async throws {
+        let runtime = try await source(record.sourceKey)
+        let initial = library.storedManga(source: record.sourceKey, key: record.mangaKey)
+            ?? library.aidokuManga(source: record.sourceKey, key: record.mangaKey)
+            ?? .init(sourceKey: record.sourceKey, key: record.mangaKey, title: record.title, cover: record.cover)
+        var manga = try await runtime.getMangaUpdate(manga: initial, needsDetails: true, needsChapters: true)
+        library.applyAidokuMangaOverrides(to: &manga, source: record.sourceKey)
+        library.synchronizeManga(manga, source: record.sourceKey)
+    }
+
+    func continueManga(_ record: LibraryManga, library: LibraryStore, resumeLastOpened: Bool) async throws -> UUID? {
+        if library.mangaRecord(source: record.sourceKey, key: record.mangaKey)?.chapters == nil {
+            try await refreshManga(record, library: library)
+        }
+        guard let chapter = library.continuation(source: record.sourceKey, manga: record.mangaKey,
+                                                resumeLastOpened: resumeLastOpened) else { return nil }
+        if let book = library.books.first(where: {
+            $0.online?.sourceKey == record.sourceKey && $0.online?.mangaKey == record.mangaKey
+                && $0.online?.chapterKey == chapter.key
+        }) {
+            try await prepare(book, library: library)
+            return book.id
+        }
+        guard let data = chapter.data, let manga = library.storedManga(source: record.sourceKey, key: record.mangaKey)
+        else { throw SourceFailure.noPages }
+        let runtime = try await source(record.sourceKey)
+        let value = try JSONDecoder().decode(AidokuRunner.Chapter.self, from: data)
+        return try await openChapter(source: runtime, manga: manga, chapter: value, library: library)
     }
 
     /// Repository and package failures are reported after the local backup has been saved.

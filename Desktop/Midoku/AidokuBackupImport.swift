@@ -311,6 +311,9 @@ extension LibraryStore {
     }
 
     func aidokuChapterCompleted(source: String, manga: String, chapter: String) -> Bool {
+        if let record = mangaRecord(source: source, key: manga)?.chapterRecord(chapter) {
+            return record.isRead
+        }
         // Local chapter progress has priority after reading since the import.
         if let book = books.first(where: {
             $0.online?.sourceKey == source && $0.online?.mangaKey == manga && $0.online?.chapterKey == chapter
