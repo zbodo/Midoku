@@ -34,6 +34,7 @@ public struct LibrarySnapshot: Codable, Equatable, Sendable {
     public var version: Int = 1
     public var books: [ComicBook] = []
     public var collections: [String] = []
+    public var aidokuBackupFile: String?
     public init() {}
 }
 
@@ -55,6 +56,7 @@ public enum LibraryPersistence {
         let snapshot = try JSONDecoder().decode(LibrarySnapshot.self, from: Data(contentsOf: url))
         guard snapshot.version == 1 else { throw LibraryError.unsupportedVersion(snapshot.version) }
         guard Set(snapshot.books.map(\.id)).count == snapshot.books.count,
+            snapshot.aidokuBackupFile.map(PageCatalog.isSafeRelativePath) ?? true,
             snapshot.books.allSatisfy({ book in
                 !book.pages.isEmpty && book.currentPage >= 0 && book.currentPage < book.pages.count
                     && (book.pageOffset.map { $0.isFinite && (0...1).contains($0) } ?? true)

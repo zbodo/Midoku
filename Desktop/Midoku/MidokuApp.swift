@@ -10,7 +10,7 @@ struct MidokuApp: App {
     init() {
         let library = LibraryStore()
         _library = StateObject(wrappedValue: library)
-        _sources = StateObject(wrappedValue: SourceStore(root: library.root.appendingPathComponent("Sources")))
+        _sources = StateObject(wrappedValue: SourceStore(root: library.root.appendingPathComponent("Sources"), library: library))
     }
     @StateObject private var shortcuts = ShortcutStore()
 
@@ -43,6 +43,11 @@ struct MidokuApp: App {
             NativeSourceHub().environmentObject(sources).environmentObject(library)
                 .frame(minWidth: 720, minHeight: 500)
         }.defaultSize(width: 1100, height: 760)
+
+        Window("Aidoku Library & Backups", id: "aidoku-backup") {
+            AidokuBackupLibraryView().environmentObject(library).environmentObject(sources)
+                .frame(minWidth: 650, minHeight: 480)
+        }.defaultSize(width: 900, height: 700)
 
         WindowGroup("Manga", id: "manga", for: SourceMangaLink.self) { $link in
             if let link {
@@ -82,6 +87,7 @@ private struct DesktopCommands: Commands {
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(library.isImporting || library.loadFailed)
             Button("Show Library") { openWindow(id: "library") }
+            Button("Aidoku Library & Backups…") { openWindow(id: "aidoku-backup") }
             Button("Sources…") { openWindow(id: "sources") }
         }
         CommandMenu("Reading") {

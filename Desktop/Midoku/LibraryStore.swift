@@ -8,9 +8,12 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var snapshot = LibrarySnapshot()
     @Published private(set) var isImporting = false
     @Published var errorMessage: String?
+    @Published var pendingAidokuBackup: AidokuBackupPreview?
+    @Published private(set) var aidokuBackup: AidokuBackupState?
     private(set) var loadFailed = false
     let root: URL
     private let importer = ComicImporter()
+    private var aidokuHistoryIndex: [[String]: AidokuBackupHistory] = [:]
     private var indexURL: URL { root.appendingPathComponent("library.json") }
 
     init(root: URL? = nil) {
@@ -21,6 +24,10 @@ final class LibraryStore: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
             snapshot = try LibraryPersistence.load(from: indexURL)
+            if let file = snapshot.aidokuBackupFile {
+                aidokuBackup = try AidokuBackupPersistence.load(from: self.root.appendingPathComponent(file))
+                aidokuHistoryIndex = aidokuBackup?.backup.historyByIdentifier ?? [:]
+            }
         } catch {
             loadFailed = true  // Never replace an unreadable library with an empty one.
             errorMessage = error.localizedDescription
@@ -86,12 +93,21 @@ final class LibraryStore: ObservableObject {
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = true
         panel.message = String(localized: "Import comic archives, PDFs, or folders of images")
-        panel.allowedContentTypes = [.folder, .image, .pdf, .zip, UTType(filenameExtension: "cbz") ?? .data]
+        panel.allowedContentTypes = [.folder, .image, .pdf, .zip, UTType(filenameExtension: "cbz") ?? .data,
+                                     UTType(filenameExtension: "aib") ?? .data, .json, .propertyList]
         if panel.runModal() == .OK { importFiles(panel.urls) }
     }
 
     func importFiles(_ urls: [URL]) {
         guard !isImporting, !loadFailed else { return }
+        if let backupURL = urls.first(where: { ["aib", "json", "plist"].contains($0.pathExtension.lowercased()) }) {
+            guard urls.count == 1 else {
+                errorMessage = "Import an Aidoku backup separately from comic files."
+                return
+            }
+            previewAidokuBackup(backupURL)
+            return
+        }
         isImporting = true
         Task {
             defer { isImporting = false }
@@ -109,5 +125,98 @@ final class LibraryStore: ObservableObject {
             }
             if !failures.isEmpty { errorMessage = failures.joined(separator: "\n\n") }
         }
+    }
+
+    func aidokuImportPanel() {
+        guard !isImporting, !loadFailed else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "aib") ?? .data, .json, .propertyList]
+        panel.message = "Choose a backup exported by Aidoku v0.9"
+        if panel.runModal() == .OK, let url = panel.url { previewAidokuBackup(url) }
+    }
+
+    private func previewAidokuBackup(_ url: URL) {
+        isImporting = true
+        Task {
+            defer { isImporting = false }
+            do {
+                pendingAidokuBackup = try await Task.detached { try AidokuBackupPreview.load(url) }.value
+            } catch { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Write the entire library atomically before applying preferences or fetching sources.
+    /// A copy of the previous library remains available even when no library file existed yet.
+    func restoreAidokuBackup(_ preview: AidokuBackupPreview, settings: Bool) throws {
+        guard !loadFailed, !isImporting else { throw CocoaError(.fileWriteUnknown) }
+        var next = snapshot
+        let archive = aidokuBackup?.merging(
+            backup: preview.backup, data: preview.data, filename: preview.filename,
+            restoreSourceSettings: settings)
+            ?? AidokuBackupState(backup: preview.backup, data: preview.data,
+                                 filename: preview.filename, restoreSourceSettings: settings)
+        for title in preview.backup.categoryTitles where !next.collections.contains(title) {
+            next.collections.append(title)
+        }
+        let histories = archive.backup.historyByIdentifier
+        for index in next.books.indices {
+            if let reference = next.books[index].online {
+                applyHistory(to: &next.books[index], history: histories[[reference.sourceKey, reference.mangaKey, reference.chapterKey]])
+            }
+        }
+        let directory = root.appendingPathComponent("Backups", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try LibraryPersistence.save(snapshot, to: directory.appendingPathComponent("before-aidoku-\(UUID()).json"))
+        let archiveDirectory = root.appendingPathComponent("AidokuBackups", isDirectory: true)
+        try FileManager.default.createDirectory(at: archiveDirectory, withIntermediateDirectories: true)
+        let archiveFile = "AidokuBackups/\(UUID()).json"
+        let archiveURL = root.appendingPathComponent(archiveFile)
+        var committed = false
+        defer { if !committed { try? FileManager.default.removeItem(at: archiveURL) } }
+        try AidokuBackupPersistence.save(archive, to: archiveURL)
+        next.aidokuBackupFile = archiveFile
+        try LibraryPersistence.save(next, to: indexURL)
+        committed = true
+        snapshot = next
+        aidokuBackup = archive
+        aidokuHistoryIndex = histories
+        if settings {
+            for (key, value) in preview.backup.desktopSettings {
+                UserDefaults.standard.set(value.rawValue, forKey: key)
+            }
+        }
+    }
+
+    func aidokuHistory(source: String, manga: String, chapter: String) -> AidokuBackupHistory? {
+        aidokuHistoryIndex[[source, manga, chapter]]
+    }
+
+    func applyImportedHistory(to book: inout ComicBook) {
+        guard let reference = book.online else { return }
+        applyHistory(to: &book, history: aidokuHistory(source: reference.sourceKey, manga: reference.mangaKey,
+                                                    chapter: reference.chapterKey))
+    }
+
+    private func applyHistory(to book: inout ComicBook, history: AidokuBackupHistory?) {
+        guard let history,
+            book.lastReadAt == nil || history.dateRead > book.lastReadAt!
+        else { return }
+        book.currentPage = history.pageIndex(pageCount: book.pages.count)
+        book.isRead = history.completed
+        book.lastReadAt = history.dateRead
+        book.pageOffset = nil // Aidoku v0.9 exports page progress, but no within-page scroll offset.
+    }
+
+    func applyAidokuSourceSettings(_ key: String, force: Bool = false) {
+        guard let state = aidokuBackup, state.restoreSourceSettings else { return }
+        let revision = state.originals.last?.id.uuidString ?? ""
+        let marker = "midoku.aidoku.settingsRevision." + key
+        guard force || UserDefaults.standard.string(forKey: marker) != revision else { return }
+        for (setting, value) in state.backup.sourceSettings(for: key) {
+            UserDefaults.standard.set(value.rawValue, forKey: setting)
+        }
+        UserDefaults.standard.set(revision, forKey: marker)
     }
 }

@@ -59,6 +59,9 @@ struct LibraryView: View {
 
     var body: some View {
         interactiveShelf
+            .sheet(item: $library.pendingAidokuBackup) { preview in
+                AidokuBackupImportView(preview: preview).environmentObject(library).environmentObject(sources)
+            }
             .alert("New Collection", isPresented: $creatingCollection) {
                 TextField("Name", text: $collectionName)
                 Button("Cancel", role: .cancel) { collectionName = "" }
@@ -179,6 +182,11 @@ struct LibraryView: View {
                 Label("Continue Reading", systemImage: "book").tag(Shelf.reading)
                 Label("Favorites", systemImage: "star").tag(Shelf.favorites)
                 Label("Finished", systemImage: "checkmark.circle").tag(Shelf.finished)
+                Button {
+                    openWindow(id: "aidoku-backup")
+                } label: {
+                    Label("Aidoku Library & Backups", systemImage: "tray.and.arrow.down")
+                }.buttonStyle(.plain)
             }
             Section("Collections") {
                 ForEach(library.snapshot.collections, id: \.self) { name in

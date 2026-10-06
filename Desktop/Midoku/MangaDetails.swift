@@ -68,10 +68,8 @@ struct NativeMangaDetails: View {
                                 ProgressView().controlSize(.small)
                             } else if chapter.locked {
                                 Image(systemName: "lock")
-                            } else if library.books.contains(where: {
-                                $0.online?.sourceKey == link.sourceKey && $0.online?.mangaKey == link.mangaKey
-                                    && $0.online?.chapterKey == chapter.key && $0.isRead
-                            }) {
+                            } else if library.aidokuChapterCompleted(source: link.sourceKey, manga: link.mangaKey,
+                                                                     chapter: chapter.key) {
                                 Image(systemName: "checkmark")
                             } else {
                                 Image(systemName: "book")
@@ -103,6 +101,7 @@ struct NativeMangaDetails: View {
         loading = true
         error = nil
         defer { loading = false }
+        if manga == nil { manga = library.aidokuManga(source: link.sourceKey, key: link.mangaKey) }
         do {
             let runtime = try await sources.source(link.sourceKey)
             source = runtime
@@ -110,6 +109,10 @@ struct NativeMangaDetails: View {
                 manga: manga
                     ?? .init(sourceKey: link.sourceKey, key: link.mangaKey, title: link.title, cover: link.cover),
                 needsDetails: true, needsChapters: true)
+            if var updated = manga {
+                library.applyAidokuMangaOverrides(to: &updated, source: link.sourceKey)
+                manga = updated
+            }
         } catch { self.error = error.localizedDescription }
     }
 
