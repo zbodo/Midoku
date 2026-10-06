@@ -1,6 +1,7 @@
 import AidokuRunner
 import AppKit
 import Foundation
+import MidokuCore
 import WebKit
 
 enum SourceFailure: LocalizedError {
