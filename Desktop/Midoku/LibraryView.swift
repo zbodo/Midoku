@@ -15,7 +15,7 @@ struct LibraryView: View {
     @State private var shelf: Shelf? = .all
     @State private var query = ""
     @State private var selection: Set<UUID> = []
-    @State private var sort = "title"
+    @State private var sort: String = "title"
     @State private var showInspector = true
     @State private var collectionName = ""
     @State private var creatingCollection = false
@@ -58,97 +58,118 @@ struct LibraryView: View {
     }
 
     var body: some View {
+        interactiveShelf
+            .alert("New Collection", isPresented: $creatingCollection) {
+                TextField("Name", text: $collectionName)
+                Button("Cancel", role: .cancel) { collectionName = "" }
+                Button("Create") { createCollection() }
+                    .disabled(collectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .confirmationDialog("Remove selected comics from the library?", isPresented: $removingBooks) {
+                Button("Remove Comics", role: .destructive) {
+                    library.remove(selection)
+                    selection = []
+                }
+            } message: {
+                Text("Imported copies will be deleted. Your original files will remain on disk.")
+            }
+            .alert("Library Error", isPresented: libraryErrorPresented) {
+                Button("OK") { library.errorMessage = nil }
+            } message: {
+                Text(library.errorMessage ?? "")
+            }
+    }
+
+    private var libraryErrorPresented: Binding<Bool> {
+        Binding(
+            get: { library.errorMessage != nil },
+            set: { if !$0 { library.errorMessage = nil } })
+    }
+
+    private var layout: some View {
         NavigationSplitView {
             sidebar
         } detail: {
-            HStack(spacing: 0) {
-                shelfContent
-                if showInspector, let book = selectedBook {
-                    Divider()
-                    inspector(book).frame(width: 260)
-                }
-            }
-            .onOpenURL { url in sourcesForLinks(url) }
-            .navigationTitle(shelfTitle)
-            .searchable(text: $query, prompt: "Search your library")
-            .toolbar {
-                Button {
-                    openWindow(id: "sources")
-                } label: {
-                    Label("Sources", systemImage: "globe")
-                }
-                ToolbarItemGroup {
-                    Button {
-                        library.importPanel()
-                    } label: {
-                        Label("Import Comics", systemImage: "plus")
-                    }
-                    .disabled(library.isImporting || library.loadFailed)
-                    Picker("Sort", selection: $sort) {
-                        Text("Title").tag("title")
-                        Text("Recently Read").tag("recent")
-                        Text("Date Imported").tag("imported")
-                    }.frame(width: 140)
-                    Menu {
-                        Slider(value: $coverSize, in: 100...260, step: 10) { Text("Cover Size") }
-                        Toggle("Show Inspector", isOn: $showInspector)
-                    } label: {
-                        Label("Shelf Appearance", systemImage: "square.grid.2x2")
-                    }
-                }
+            shelfDetail
+        }
+    }
+
+    private var shelfDetail: some View {
+        HStack(spacing: 0) {
+            shelfContent
+            if showInspector, let book = selectedBook {
+                Divider()
+                inspector(book).frame(width: 260)
             }
         }
-        .onChange(of: shelf) { _, _ in
-            selection = []
-            selectionAnchor = nil
-            selectionCursor = nil
-        }
-        .onChange(of: query) { _, _ in selection = selection.intersection(Set(visibleBooks.map(\.id))) }
-        .onChange(of: library.books) { _, _ in selection = selection.intersection(Set(library.books.map(\.id))) }
-        .onDrop(of: [.fileURL], isTargeted: $targetForDrop) { providers in
-            guard !library.isImporting, !library.loadFailed else { return false }
-            Task { @MainActor in
-                var urls: [URL] = []
-                for provider in providers {
-                    if let url = await droppedURL(provider) { urls.append(url) }
-                }
-                library.importFiles(urls)
-            }
-            return true
-        }
-        .overlay {
-            if targetForDrop {
-                RoundedRectangle(cornerRadius: 12).stroke(.tint, lineWidth: 4).padding(8).allowsHitTesting(false)
+        .onOpenURL { url in sourcesForLinks(url) }
+        .navigationTitle(shelfTitle)
+        .searchable(text: $query, prompt: "Search your library")
+        .toolbar { shelfToolbar }
+    }
+
+    @ToolbarContentBuilder private var shelfToolbar: some ToolbarContent {
+        ToolbarItem {
+            Button {
+                openWindow(id: "sources")
+            } label: {
+                Label("Sources", systemImage: "globe")
             }
         }
-        .alert("New Collection", isPresented: $creatingCollection) {
-            TextField("Name", text: $collectionName)
-            Button("Cancel", role: .cancel) { collectionName = "" }
-            Button("Create") {
-                let name = collectionName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty, !library.snapshot.collections.contains(name) {
-                    library.commit { $0.collections.append(name) }
-                    shelf = .collection(name)
-                }
-                collectionName = ""
-            }.disabled(collectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        ToolbarItem {
+            Button {
+                library.importPanel()
+            } label: {
+                Label("Import Comics", systemImage: "plus")
+            }
+            .disabled(library.isImporting || library.loadFailed)
         }
-        .confirmationDialog("Remove selected comics from the library?", isPresented: $removingBooks) {
-            Button("Remove Comics", role: .destructive) {
-                library.remove(selection)
+        ToolbarItem { sortPicker }
+        ToolbarItem { appearanceMenu }
+    }
+
+    private var sortPicker: some View {
+        Picker("Sort", selection: $sort) {
+            Text("Title").tag("title")
+            Text("Recently Read").tag("recent")
+            Text("Date Imported").tag("imported")
+        }.frame(width: 140)
+    }
+
+    private var appearanceMenu: some View {
+        Menu {
+            Slider(value: $coverSize, in: 100...260, step: 10) { Text("Cover Size") }
+            Toggle("Show Inspector", isOn: $showInspector)
+        } label: {
+            Label("Shelf Appearance", systemImage: "square.grid.2x2")
+        }
+    }
+
+    private var interactiveShelf: some View {
+        layout
+            .onChange(of: shelf) { _, _ in
                 selection = []
+                selectionAnchor = nil
+                selectionCursor = nil
             }
-        } message: {
-            Text("Imported copies will be deleted. Your original files will remain on disk.")
-        }
-        .alert(
-            "Library Error",
-            isPresented: Binding(get: { library.errorMessage != nil }, set: { if !$0 { library.errorMessage = nil } })
-        ) {
-            Button("OK") { library.errorMessage = nil }
-        } message: {
-            Text(library.errorMessage ?? "")
-        }
+            .onChange(of: query) { _, _ in selection = selection.intersection(Set(visibleBooks.map(\.id))) }
+            .onChange(of: library.books) { _, _ in selection = selection.intersection(Set(library.books.map(\.id))) }
+            .onDrop(of: [.fileURL], isTargeted: $targetForDrop) { providers in
+                guard !library.isImporting, !library.loadFailed else { return false }
+                Task { @MainActor in
+                    var urls: [URL] = []
+                    for provider in providers {
+                        if let url = await droppedURL(provider) { urls.append(url) }
+                    }
+                    library.importFiles(urls)
+                }
+                return true
+            }
+            .overlay {
+                if targetForDrop {
+                    RoundedRectangle(cornerRadius: 12).stroke(.tint, lineWidth: 4).padding(8).allowsHitTesting(false)
+                }
+            }
     }
 
     private var sidebar: some View {
@@ -185,6 +206,15 @@ struct LibraryView: View {
                 if library.isImporting { ProgressView().controlSize(.small) }
             }.padding(12)
         }
+    }
+
+    private func createCollection() {
+        let name = collectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty, !library.snapshot.collections.contains(name) {
+            library.commit { $0.collections.append(name) }
+            shelf = .collection(name)
+        }
+        collectionName = ""
     }
 
     private func deleteCollection(_ name: String) {
