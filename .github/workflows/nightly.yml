@@ -2,11 +2,15 @@ name: Build native macOS app
 
 on: [push, workflow_dispatch]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: xcode-27
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      SIGNING_KEYCHAIN: ${{ runner.temp }}/midoku-${{ github.run_id }}-${{ github.run_attempt }}.keychain-db
     steps:
       - uses: actions/checkout@v5
       - name: Show build environment
@@ -14,23 +18,95 @@ jobs:
           sw_vers
           xcodebuild -version
           xcrun swift --version
-      - name: Build
+      - name: Import Developer ID certificate
+        id: signing
+        shell: bash
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CERTIFICATE_BASE64" || -z "$CERTIFICATE_PASSWORD" || ! "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo '::error::Configure MACOS_CERTIFICATE_BASE64, MACOS_CERTIFICATE_PASSWORD and APPLE_TEAM_ID repository secrets.'
+            exit 1
+          fi
+          umask 077
+          certificate_path="$RUNNER_TEMP/midoku-signing.p12"
+          trap 'rm -f "$certificate_path"' EXIT
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          keychain_password=$(openssl rand -hex 32)
+          echo "::add-mask::$keychain_password"
+          security create-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$SIGNING_KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
+          security import "$certificate_path" -k "$SIGNING_KEYCHAIN" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$SIGNING_KEYCHAIN" >/dev/null
+          identities=$(security find-identity -v -p codesigning "$SIGNING_KEYCHAIN")
+          identity=$(printf '%s\n' "$identities" | \
+            awk '/^[[:space:]]*[0-9]+\) [A-Fa-f0-9]+ "Developer ID Application:/ {print $2}')
+          if [[ ! "$identity" =~ ^[A-Fa-f0-9]{40}$ ]] || \
+            ! printf '%s\n' "$identities" | grep -F "($TEAM_ID)\"" >/dev/null; then
+            echo '::error::The P12 must contain exactly one valid Developer ID Application identity, including its private key, matching APPLE_TEAM_ID.'
+            exit 1
+          fi
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+      - name: Build signed app
+        env:
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath build/Desktop \
             -skipPackagePluginValidation -onlyUsePackageVersionsFromResolvedFile \
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            DEVELOPMENT_TEAM="$TEAM_ID" ENABLE_HARDENED_RUNTIME=YES \
+            OTHER_CODE_SIGN_FLAGS="--keychain $SIGNING_KEYCHAIN --timestamp" build
       - name: Verify Apple Silicon architecture
         run: |
           lipo build/Desktop/Build/Products/Release/Midoku.app/Contents/MacOS/Midoku \
             -verify_arch arm64
-      - name: Package app
+      - name: Verify Developer ID signature
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            build/Desktop/Build/Products/Release/Midoku.app Midoku-macOS.zip
+          set -euo pipefail
+          app_path=build/Desktop/Build/Products/Release/Midoku.app
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          signature=$(codesign --display --verbose=4 "$app_path" 2>&1)
+          printf '%s\n' "$signature"
+          printf '%s\n' "$signature" | grep -F 'Authority=Developer ID Application:'
+          printf '%s\n' "$signature" | grep -Fx "TeamIdentifier=$TEAM_ID"
+          printf '%s\n' "$signature" | grep -E '^Timestamp='
+      - name: Create and sign DMG
+        env:
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          set -euo pipefail
+          staging_path=$(mktemp -d "$RUNNER_TEMP/midoku-dmg.XXXXXX")
+          trap 'rm -rf "$staging_path"' EXIT
+          ditto build/Desktop/Build/Products/Release/Midoku.app "$staging_path/Midoku.app"
+          ln -s /Applications "$staging_path/Applications"
+          hdiutil create -volname Midoku -srcfolder "$staging_path" \
+            -fs HFS+ -format UDZO -ov Midoku-macOS.dmg
+          codesign --sign "$SIGNING_IDENTITY" --keychain "$SIGNING_KEYCHAIN" \
+            --timestamp Midoku-macOS.dmg
+          codesign --verify --strict --verbose=2 Midoku-macOS.dmg
+          hdiutil verify Midoku-macOS.dmg
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: Midoku-macOS-unsigned
-          path: Midoku-macOS.zip
+          path: Midoku-macOS.dmg
+          archive: false
           if-no-files-found: error
+      - name: Remove signing keychain
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$SIGNING_KEYCHAIN" ]]; then
+            security delete-keychain "$SIGNING_KEYCHAIN"
+          fi
+          rm -f "$RUNNER_TEMP/midoku-signing.p12"

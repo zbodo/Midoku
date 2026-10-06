@@ -152,9 +152,11 @@ xcodebuild -project Midoku.xcodeproj -scheme Midoku \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test
 ```
 
-The macOS workflow runs both checks; nightly builds create an unsigned app ZIP.
-Distribution signing/notarization is not configured. Workflow definitions do
-not establish that CI has already passed.
+The macOS workflow runs both checks; nightly builds create a Developer ID signed
+app DMG using repository secrets, uploaded directly without a ZIP wrapper.
+See [CI signing setup](CI_SIGNING.md).
+Notarization is not configured. Workflow definitions do not establish that CI
+has already passed.
 
 Development in the cloud uses Linux: **33 portable tests passed**; Swift syntax,
 project references, property lists and workflow configuration were checked.
