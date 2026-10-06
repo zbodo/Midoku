@@ -50,6 +50,10 @@ final class ComicScrollView: NSScrollView {
         hasHorizontalScroller = true
         autohidesScrollers = true
         borderType = .noBorder
+        // The reader lays out beneath floating controls using the full viewport.
+        // AppKit's titlebar insets would add a second, artificial scroll range.
+        automaticallyAdjustsContentInsets = false
+        contentInsets = NSEdgeInsetsZero
         documentView = comic
         comic.viewport = self
         contentView.postsBoundsChangedNotifications = true

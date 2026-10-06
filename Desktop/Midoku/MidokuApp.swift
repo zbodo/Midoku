@@ -43,6 +43,8 @@ struct MidokuApp: App {
             .background(WindowLifecycleRegistration())
         }
         .defaultSize(width: 1000, height: 800)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
 
         Window("Sources", id: "sources") {
             NativeSourceHub().environmentObject(sources).environmentObject(library)

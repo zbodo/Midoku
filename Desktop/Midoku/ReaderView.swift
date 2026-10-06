@@ -86,9 +86,10 @@ struct ReaderWindowView: View {
             .preferredColorScheme(background == "dark" ? .dark : background == "light" ? .light : nil)
             .background(ReaderKeyboardScope(session: session, shortcuts: shortcuts.map))
             .navigationTitle(session.title)
-            .navigationSubtitle(session.pageLabel)
             .focusedSceneValue(\.readerSession, session)
-            .toolbar(.hidden, for: .windowToolbar)
+            .toolbar { readerToolbar }
+            .toolbar(session.chromeVisible ? .visible : .hidden, for: .windowToolbar)
+            .toolbarBackground(.hidden, for: .windowToolbar)
             .onAppear {
                 session.revealLibrary = { openWindow(id: "library") }
                 if !hintsSeen { showHelp = true }
@@ -188,17 +189,6 @@ struct ReaderWindowView: View {
             }
             ReaderCanvas(session: session, background: color)
                 .ignoresSafeArea(.container, edges: .top)
-                .overlay(alignment: .top) {
-                    if session.chromeVisible {
-                        readerToolbar
-                            .buttonStyle(.borderless)
-                            .labelStyle(.iconOnly)
-                            .padding(.horizontal, 14).padding(.vertical, 10)
-                            .modifier(ReaderGlassSurface())
-                            .padding(.horizontal, 12).padding(.top, 32)
-                            .transition(.opacity)
-                    }
-                }
                 .overlay(alignment: .bottom) {
                     if session.chromeVisible {
                         readerProgress
@@ -247,54 +237,62 @@ struct ReaderWindowView: View {
         }.buttonStyle(.borderless)
     }
 
-    private var readerToolbar: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 12) {
-                Button {
-                    session.saveProgress()
-                    session.window?.performClose(nil)
-                } label: {
-                    Image(systemName: "xmark")
-                }.help("Close Reader").accessibilityLabel("Close Reader")
-                Button {
-                    openChapterList()
-                } label: {
-                    Image(systemName: "list.bullet")
-                }
-                .help(session.book?.online == nil ? "Show / Hide Thumbnails" : "Chapters")
-                .accessibilityLabel(session.book?.online == nil ? "Show / Hide Thumbnails" : "Chapters")
-            }.frame(width: 64, alignment: .leading)
-            readerTitle.frame(maxWidth: .infinity)
-            HStack(spacing: 12) {
+    @ToolbarContentBuilder
+    private var readerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                openChapterList()
+            } label: {
+                Label(session.book?.online == nil ? "Show / Hide Thumbnails" : "Chapters", systemImage: "list.bullet")
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: 36, height: 36)
+            }
+            .controlSize(.large)
+            .help(session.book?.online == nil ? "Show / Hide Thumbnails" : "Chapters")
+            .popover(isPresented: $showHelp) { readerHelp }
+        }
+        ToolbarItem(placement: .principal) {
+            readerTitle
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            if session.book?.online != nil {
                 Button {
                     showWebsite = true
                 } label: {
-                    Image(systemName: "safari")
+                    Label("Open Chapter Website", systemImage: "safari")
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 36, height: 36)
                 }
+                .controlSize(.large)
                 .disabled(session.chapterWebsiteURL == nil)
-                .help("Open Chapter Website").accessibilityLabel("Open Chapter Website")
-                Button {
-                    session.perform(.readingSettings)
-                } label: {
-                    Image(systemName: "textformat.size")
-                }.help("Reading Settings").accessibilityLabel("Reading Settings")
-            }.frame(width: 64, alignment: .trailing)
+                .help("Open Chapter Website")
+            }
+            Button {
+                session.perform(.readingSettings)
+            } label: {
+                Label("Reading Settings", systemImage: "slider.horizontal.3")
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: 36, height: 36)
+            }
+            .controlSize(.large)
+            .help("Reading Settings")
         }
-        .font(.system(size: 15))
-        .frame(maxWidth: .infinity)
-        .popover(isPresented: $showHelp) { readerHelp }
     }
 
     private var readerTitle: some View {
         VStack(spacing: 2) {
             if let reference = session.book?.online {
-                Text(reference.mangaTitle).font(.caption).foregroundStyle(.secondary)
-                Text(reference.chapterTitle).font(.headline)
+                Text(reference.mangaTitle).font(.headline)
+                Text(reference.chapterTitle).font(.subheadline).foregroundStyle(.secondary)
             } else {
                 Text(session.title).font(.headline)
             }
         }
         .lineLimit(1).truncationMode(.middle)
+        .frame(minWidth: 120, idealWidth: 360, maxWidth: 600, minHeight: 40)
         .accessibilityElement(children: .combine)
         .help(session.book?.online.map { "\($0.mangaTitle) — \($0.chapterTitle)" } ?? session.title)
     }

@@ -111,12 +111,13 @@ and cached images.
   unloaded pages show a live native spinner rather than a loading sentence.
   Loaded images replace the spinner, and failures remain retryable.
   Reduce Motion skips the sliding animation.
-- Top controls and progress float over the unchanged viewport, using native
-  Liquid Glass on macOS 26+ and material on earlier macOS. Turns hide controls
-  automatically; the center area or Q restores them. The top bar follows
-  Aidoku: close and chapter navigation on the left, a centered manga/chapter
-  title, and chapter website plus reading settings on the right. Local books
-  use the list button for thumbnails. Layout, overview, zoom and help live in
+- Top controls use the native macOS window toolbar. Page and progress controls
+  float over the canvas, using native Liquid Glass on macOS 26+ and material on
+  earlier macOS. Turns hide controls automatically; the center area or Q restores
+  them. The toolbar places standard window controls and chapter navigation
+  on the left, a centered two-line manga/chapter title, and chapter website plus reading
+  settings on the right. Local books use the list button for thumbnails and omit
+  the website button. Layout, overview, zoom and help live in
   Reading Settings rather than crowding the top bar.
 - Adaptive paging and continuous reading use
   the same AppKit scrolling viewport. Click the outer 37.5% areas to turn pages;

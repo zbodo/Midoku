@@ -12,9 +12,9 @@ final class ImporterTests: XCTestCase {
         return root
     }
 
-    private func png(width: Int = 8) throws -> Data {
+    private func png(width: Int = 8, height: Int = 12) throws -> Data {
         let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: 12, bitsPerSample: 8,
+            bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
             samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
             bytesPerRow: 0, bitsPerPixel: 0)!
         return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
@@ -259,6 +259,57 @@ final class ImporterTests: XCTestCase {
         session.perform(.nextPage)
         XCTAssertEqual(session.position.page, 7)
         viewport.stop()
+    }
+
+    @MainActor
+    func testFittedAdaptiveViewportWithWindowToolbarHasNoScrollRange() throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = LibraryStore(root: root)
+        let book = ComicBook(title: "Toolbar layout", pages: ["0.png"], sourceIdentity: "fixture")
+        let pages = root.appendingPathComponent(book.id.uuidString)
+        try FileManager.default.createDirectory(at: pages, withIntermediateDirectories: true)
+        try png(width: 1000, height: 1400).write(to: pages.appendingPathComponent("0.png"))
+        library.commit { $0.books.append(book) }
+        let previousLayout = UserDefaults.standard.object(forKey: "desktop.layout")
+        defer {
+            if let previousLayout {
+                UserDefaults.standard.set(previousLayout, forKey: "desktop.layout")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "desktop.layout")
+            }
+        }
+        let session = ReaderSession(book: book, library: library)
+        session.setLayout(.adaptive)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 800),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.toolbar = NSToolbar(identifier: "ReaderLayoutTest")
+        window.toolbarStyle = .unified
+        let viewport = ComicScrollView(frame: .zero)
+        window.contentView = viewport
+        defer { viewport.stop() }
+        viewport.configure(session: session, background: .black)
+
+        for size in [NSSize(width: 1000, height: 800), NSSize(width: 440, height: 360)] {
+            window.setContentSize(size)
+            for visible in [true, false, true] {
+                window.toolbar?.isVisible = visible
+                viewport.layoutSubtreeIfNeeded()
+                viewport.tile()
+                viewport.layoutComic(resetPosition: false)
+                let document = try XCTUnwrap(viewport.documentView)
+                XCTAssertEqual(document.frame.height, viewport.contentView.bounds.height, accuracy: 0.5)
+                XCTAssertEqual(viewport.documentVisibleRect.height, document.frame.height, accuracy: 0.5)
+                XCTAssertTrue(try XCTUnwrap(viewport.verticalScroller).isHidden)
+            }
+        }
+        session.zoom = .actual
+        viewport.configure(session: session, background: .black)
+        XCTAssertGreaterThan(try XCTUnwrap(viewport.documentView).frame.height, viewport.contentView.bounds.height)
+        XCTAssertFalse(try XCTUnwrap(viewport.verticalScroller).isHidden)
     }
 
     @MainActor
