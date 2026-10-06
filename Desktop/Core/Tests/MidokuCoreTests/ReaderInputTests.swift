@@ -4,18 +4,18 @@ import XCTest
 
 final class ReaderInputTests: XCTestCase {
     func testClickZonesMirrorDirectionAndContinuousNeverTurns() {
-        XCTAssertEqual(ReaderInputPolicy.click(at: 0.1, direction: .rightToLeft, layout: .spread), .next)
-        XCTAssertEqual(ReaderInputPolicy.click(at: 0.9, direction: .rightToLeft, layout: .spread), .previous)
-        XCTAssertEqual(ReaderInputPolicy.click(at: 0.1, direction: .leftToRight, layout: .single), .previous)
-        XCTAssertEqual(ReaderInputPolicy.click(at: 0.9, direction: .leftToRight, layout: .single), .next)
+        XCTAssertEqual(ReaderInputPolicy.click(at: 0.1, direction: .rightToLeft, layout: .adaptive), .next)
+        XCTAssertEqual(ReaderInputPolicy.click(at: 0.9, direction: .rightToLeft, layout: .adaptive), .previous)
+        XCTAssertEqual(ReaderInputPolicy.click(at: 0.1, direction: .leftToRight, layout: .adaptive), .previous)
+        XCTAssertEqual(ReaderInputPolicy.click(at: 0.9, direction: .leftToRight, layout: .adaptive), .next)
         for fraction in [0.375, 0.5, 0.625] {
-            XCTAssertEqual(ReaderInputPolicy.click(at: fraction, direction: .rightToLeft, layout: .single), .controls)
+            XCTAssertEqual(ReaderInputPolicy.click(at: fraction, direction: .rightToLeft, layout: .adaptive), .controls)
         }
         XCTAssertEqual(ReaderInputPolicy.click(at: 0.1, direction: .rightToLeft, layout: .continuous), .controls)
         XCTAssertEqual(
-            ReaderInputPolicy.click(at: 0.1, direction: .rightToLeft, layout: .single, enabled: false), .controls)
+            ReaderInputPolicy.click(at: 0.1, direction: .rightToLeft, layout: .adaptive, enabled: false), .controls)
         XCTAssertEqual(
-            ReaderInputPolicy.click(at: 0.1, direction: .rightToLeft, layout: .single, swapSides: true), .previous)
+            ReaderInputPolicy.click(at: 0.1, direction: .rightToLeft, layout: .adaptive, swapSides: true), .previous)
     }
     func testTrackpadTurnsOnceAndIgnoresMomentum() {
         var gate = WheelTurnGate()

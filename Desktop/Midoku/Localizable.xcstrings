@@ -2638,6 +2638,16 @@
           }
         }
       }
+    },
+    "Adaptive Pages": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自适应分页"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

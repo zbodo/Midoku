@@ -41,7 +41,7 @@ final class ReaderSession: ObservableObject {
             ReadingDirection(rawValue: UserDefaults.standard.string(forKey: "desktop.direction") ?? "")
             ?? .rightToLeft
         var layout =
-            PageLayout(rawValue: UserDefaults.standard.string(forKey: "desktop.layout") ?? "") ?? .single
+            PageLayout.preference(UserDefaults.standard.string(forKey: "desktop.layout"))
         if let data = book.online?.mangaData,
             let manga = try? JSONDecoder().decode(AidokuRunner.Manga.self, from: data)
         {
@@ -61,7 +61,7 @@ final class ReaderSession: ObservableObject {
     var title: String { book?.title ?? String(localized: "Reader") }
     var pageLabel: String {
         let pages = position.visiblePages
-        let visible = pages.count == 2 ? "\(pages[0] + 1)–\(pages[1] + 1)" : "\(position.page + 1)"
+        let visible = pages.count > 1 ? "\(pages[0] + 1)–\(pages[pages.count - 1] + 1)" : "\(position.page + 1)"
         return "\(visible) / \(position.count)"
     }
 
@@ -69,7 +69,7 @@ final class ReaderSession: ObservableObject {
         guard count > 0, count != position.count else { return }
         position = ReadingPosition(
             count: count, page: position.page, layout: position.layout,
-            coverIsSingle: position.coverIsSingle)
+            pageCapacity: position.pageCapacity)
         reloadToken = UUID()
         saveProgress()
     }
@@ -90,11 +90,10 @@ final class ReaderSession: ObservableObject {
         saveProgress()
     }
 
-    func setSingleCover(_ enabled: Bool) {
-        position.coverIsSingle = enabled
-        position.seek(position.page)
-        navigationRevision = UUID()
-        saveProgress()
+    func updateVisiblePageCount(_ count: Int) {
+        let capacity = max(1, count)
+        guard position.pageCapacity != capacity else { return }
+        position.pageCapacity = capacity
     }
 
     func perform(_ action: ReaderAction) {
@@ -195,7 +194,7 @@ final class ReaderSession: ObservableObject {
 
     func saveProgress(reachedEnd: Bool = false) {
         progressTask?.cancel()
-        let last = position.visiblePages.last == position.count - 1
+        let last = position.count > 0 && position.page == position.count - 1
         library.saveProgress(
             bookID, page: position.page,
             finished: last && (position.layout != .continuous || reachedEnd || reachedViewportEnd),

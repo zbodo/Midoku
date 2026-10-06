@@ -79,7 +79,17 @@ source preserves chapter records and cached images.
   Arrows navigate the grid, Return or double-click opens the reader.
 - Different chapters/books have independent, resizable reader windows. Closing
   one leaves the library and other readers open.
-- Single pages, spreads with optional single cover, and continuous reading use
+- Adaptive paging chooses one, two or more pages from the available viewport
+  width/height and image aspect ratios. Each turn shifts the leading page by
+  exactly one (1–3 → 2–4); resizing keeps that page. Older single/spread
+  preferences migrate to adaptive paging. The single-cover exception is removed.
+  Nonempty chapters always show at least one page, including narrow windows and
+  landscape images. LTR renders pages in ascending order, RTL in descending
+  order; both advance the logical leading page by one. Landscape images
+  (width > height) occupy two page slots, but remain one unsplit image and one
+  navigation/progress entry. If two slots do not fit, the entire image is fitted
+  into the available viewport as the sole page.
+- Adaptive paging and continuous reading use
   the same AppKit scrolling viewport. Click the outer 37.5% areas to turn pages;
   the center toggles controls. Sides follow reading direction. Continuous mode
   clicks only toggle controls. Dragging cancels a click and never pans the page.
@@ -91,7 +101,7 @@ source preserves chapter records and cached images.
   additional pages. Continuous mode always scrolls. Command-wheel and pinch
   zoom the main viewport; optional reverse wheel paging only affects fitted pages.
 - The eHunter-style defaults bind A / Left / Up to previous page and D / Right /
-  Down to next page/group. Space / Shift-Space (also Page Down / Page Up) scroll
+  Down to next page. Space / Shift-Space (also Page Down / Page Up) scroll
   90% of a viewport in continuous mode and turn pages in paged mode. Q toggles
   controls, T thumbnails, F a thumbnail overview, R reading settings, and [ / ]
   adjust fit-width by five percentage points. Control-Command-F is native full screen.
@@ -111,7 +121,7 @@ source preserves chapter records and cached images.
 
 `Desktop/Core` is a dependency-free Swift package for versioned/atomic library
 persistence, modern repository parsing, online chapter identities, validated
-page paths, spread navigation, click/drag/wheel input policies and versioned
+page paths, adaptive page selection and single-step navigation, click/drag/wheel input policies and versioned
 multi-binding shortcut validation.
 
 `Desktop/Midoku` owns native scenes, library/import services, source management,
@@ -146,7 +156,7 @@ The macOS workflow runs both checks; nightly builds create an unsigned app ZIP.
 Distribution signing/notarization is not configured. Workflow definitions do
 not establish that CI has already passed.
 
-Development in the cloud uses Linux: **30 portable tests passed**; Swift syntax,
+Development in the cloud uses Linux: **33 portable tests passed**; Swift syntax,
 project references, property lists and workflow configuration were checked.
 The complete dependency graph also resolved successfully using the locked
 versions with `--force-resolved-versions`.
@@ -164,6 +174,7 @@ then uninstall/reinstall the source. The previous baseline was reported to
 compile and launch on the user's Mac; this reader refactor still requires a
 macOS build and interactive checks. Verify simultaneous readers, RTL/LTR click
 zones, drag cancellation, double-click without a stray turn, tall-page boundary
-scrolling, trackpad inertia, continuous position restoration, shortcut migration,
+scrolling, trackpad inertia, adaptive one/two/multi-page resizing, one-page turns
+near the chapter end, continuous position restoration, shortcut migration,
 text-field focus, resizing and VoiceOver. Website network access requires the chosen
 source's repository, API and image hosts to be allowed by the cloud environment.

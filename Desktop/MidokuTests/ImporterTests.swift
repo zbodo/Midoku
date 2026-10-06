@@ -168,8 +168,10 @@ final class ImporterTests: XCTestCase {
                 UserDefaults.standard.removeObject(forKey: "desktop.layout")
             }
         }
-        first.setLayout(.single)
-        second.setLayout(.single)
+        first.setLayout(.adaptive)
+        second.setLayout(.adaptive)
+        first.updateVisiblePageCount(3)
+        XCTAssertEqual(first.position.visiblePages, [0, 1, 2])
         let shortcuts = ShortcutMap()
         XCTAssertTrue(first.handleKey(.init(key: "q"), shortcuts: shortcuts, repeatEvent: false))
         XCTAssertFalse(first.chromeVisible)
@@ -178,6 +180,8 @@ final class ImporterTests: XCTestCase {
         XCTAssertFalse(first.chromeVisible)
         XCTAssertTrue(first.handleKey(.init(key: "d"), shortcuts: shortcuts, repeatEvent: false))
         XCTAssertEqual(first.position.page, 1)
+        XCTAssertEqual(first.position.visiblePages, [1, 2])
+        XCTAssertFalse(try XCTUnwrap(library.book(book.id)).isRead)
         XCTAssertEqual(second.position.page, 0)
         first.setLayout(.continuous)
         first.didScroll(page: 1, offset: 0.6, reachedEnd: false)
@@ -190,6 +194,79 @@ final class ImporterTests: XCTestCase {
         XCTAssertEqual(reopened.pageOffset, 0.6)
         XCTAssertEqual(reopened.position.page, 1)
         XCTAssertFalse(stored.isRead)
+    }
+
+    @MainActor
+    func testAdaptiveViewportResizingAndSingleStepNavigation() async throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = LibraryStore(root: root)
+        let book = ComicBook(
+            title: "Adaptive chapter", pages: (0..<8).map { "\($0).png" }, sourceIdentity: "fixture")
+        library.commit { $0.books.append(book) }
+        let previousLayout = UserDefaults.standard.object(forKey: "desktop.layout")
+        let previousDirection = UserDefaults.standard.object(forKey: "desktop.direction")
+        defer {
+            if let previousLayout {
+                UserDefaults.standard.set(previousLayout, forKey: "desktop.layout")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "desktop.layout")
+            }
+            if let previousDirection {
+                UserDefaults.standard.set(previousDirection, forKey: "desktop.direction")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "desktop.direction")
+            }
+        }
+        let session = ReaderSession(book: book, library: library)
+        session.setLayout(.adaptive)
+        session.direction = .leftToRight
+        let viewport = ComicScrollView(frame: NSRect(x: 0, y: 0, width: 1900, height: 832))
+        viewport.tile()
+        viewport.configure(session: session, background: .black)
+        await settleViewport(session, capacity: viewport.displayedPages.count)
+        XCTAssertEqual(session.position.visiblePages, [0, 1, 2])
+        XCTAssertEqual(viewport.displayedPages, [0, 1, 2])
+        session.direction = .rightToLeft
+        viewport.configure(session: session, background: .black)
+        await settleViewport(session, capacity: viewport.displayedPages.count)
+        XCTAssertEqual(viewport.displayedPages, [2, 1, 0])
+        session.perform(.nextPage)
+        viewport.configure(session: session, background: .black)
+        await settleViewport(session, capacity: viewport.displayedPages.count)
+        XCTAssertEqual(session.position.visiblePages, [1, 2, 3])
+        XCTAssertEqual(viewport.displayedPages, [3, 2, 1])
+        XCTAssertEqual(session.pageLabel, "2–4 / 8")
+        viewport.setFrameSize(NSSize(width: 200, height: 832))
+        viewport.tile()
+        viewport.layoutComic(resetPosition: false)
+        await settleViewport(session, capacity: viewport.displayedPages.count)
+        XCTAssertEqual(session.position.page, 1)
+        XCTAssertEqual(session.position.visiblePages, [1])
+        XCTAssertEqual(viewport.displayedPages, [1])
+        viewport.setFrameSize(NSSize(width: 1900, height: 832))
+        viewport.tile()
+        viewport.layoutComic(resetPosition: false)
+        await settleViewport(session, capacity: viewport.displayedPages.count)
+        XCTAssertEqual(session.position.visiblePages, [1, 2, 3])
+        session.seek(6)
+        viewport.configure(session: session, background: .black)
+        await settleViewport(session, capacity: viewport.displayedPages.count)
+        XCTAssertEqual(session.position.visiblePages, [6, 7])
+        XCTAssertEqual(viewport.displayedPages, [7, 6])
+        session.perform(.nextPage)
+        XCTAssertEqual(session.position.page, 7)
+        viewport.stop()
+    }
+
+    @MainActor
+    private func settleViewport(_ session: ReaderSession, capacity: Int) async {
+        // Capacity is published on the next main-actor turn; wait for that
+        // result rather than assuming a single yield schedules the update.
+        for _ in 0..<100 {
+            if session.position.pageCapacity == max(1, capacity) { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
 }

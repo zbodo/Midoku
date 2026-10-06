@@ -2,7 +2,7 @@ import AppKit
 import MidokuCore
 import SwiftUI
 
-// All three reading layouts use the same native viewport and input rules.
+// Adaptive paging and continuous reading share the native viewport and input rules.
 struct ReaderCanvas: NSViewRepresentable {
     @ObservedObject var session: ReaderSession
     let background: NSColor
@@ -23,12 +23,14 @@ final class ComicScrollView: NSScrollView {
     private var reloadToken: UUID?
     private var bookID: UUID?
     private var paths: [String] = []
+    private var measuredSizes: [Int: NSSize] = [:]
     private var mode: PageLayout?
     private var ordering: ReadingDirection?
     private var layingOut = false
     private var hasLayout = false
     private var wheel = WheelTurnGate()
     private var lastNavigation: TimeInterval = 0
+    var displayedPages: [Int] { comic.items.map(\.page) }
 
     override var acceptsFirstResponder: Bool { true }
     override init(frame frameRect: NSRect) {
@@ -57,31 +59,20 @@ final class ComicScrollView: NSScrollView {
             || ordering != session.direction
         revision = session.navigationRevision
         reloadToken = session.reloadToken
-        let pages: [Int]
-        if session.position.layout == .continuous {
-            pages = Array(book.pages.indices)
-        } else {
-            pages =
-                session.direction == .rightToLeft
-                ? Array(session.position.visiblePages.reversed()) : session.position.visiblePages
+        if bookID != book.id || paths != book.pages || reload {
+            measuredSizes = [:]
         }
-        if structureChanged || comic.items.map(\.page) != pages || reload {
+        if structureChanged || reload {
             hasLayout = false
-            let old = Dictionary(uniqueKeysWithValues: comic.items.map { ($0.page, $0) })
             for pending in tasks.values { pending.1.cancel() }
             tasks = [:]
             comic.cancelClick()
-            comic.items = pages.map { page in
-                if !reload, bookID == book.id, paths == book.pages, let previous = old[page] {
-                    return previous
-                }
-                return ComicPageItem(page: page, url: session.library.pageURL(for: book, at: page))
-            }
-            bookID = book.id
-            paths = book.pages
-            mode = session.position.layout
-            ordering = session.direction
+            comic.items = []
         }
+        bookID = book.id
+        paths = book.pages
+        mode = session.position.layout
+        ordering = session.direction
         layoutComic(resetPosition: navigated || structureChanged)
         loadVisiblePages()
     }
@@ -128,14 +119,68 @@ final class ComicScrollView: NSScrollView {
         return (item.page, min(1, max(0, Double((top - item.rect.minY) / max(1, item.rect.height)))))
     }
 
+    private func refreshVisiblePages() {
+        guard let session, let book = session.book else { return }
+        let pages: [Int]
+        if session.position.layout == .continuous {
+            pages = Array(book.pages.indices)
+        } else {
+            let available = contentView.bounds.size
+            let width = max(1, Double(available.width) - 32)
+            let height = max(1, Double(available.height) - 32)
+            // Bound lookahead by the minimum readable width instead of scanning
+            // or decoding the entire chapter whenever the window resizes.
+            let limit = max(1, Int(width / AdaptivePageLayout.minimumPageWidth) + 1)
+            let candidates = Array((session.position.page..<session.position.count).prefix(limit))
+            let count = AdaptivePageLayout.pageCount(
+                width: width, height: height,
+                aspectRatios: candidates.map { page in
+                    let size = measuredSizes[page] ?? NSSize(width: 1000, height: 1400)
+                    return Double(size.width / size.height)
+                })
+            let logical = Array(candidates.prefix(count))
+            pages = session.direction == .rightToLeft ? Array(logical.reversed()) : logical
+        }
+        let old = Dictionary(uniqueKeysWithValues: comic.items.map { ($0.page, $0) })
+        if displayedPages != pages {
+            let wanted = Set(pages)
+            for page in Array(tasks.keys) where !wanted.contains(page) {
+                tasks.removeValue(forKey: page)?.1.cancel()
+            }
+            comic.cancelClick()
+            comic.items = pages.map { page in
+                if let previous = old[page] { return previous }
+                var item = ComicPageItem(page: page, url: session.library.pageURL(for: book, at: page))
+                if let size = measuredSizes[page] { item.size = size }
+                return item
+            }
+        }
+        let count = session.position.layout == .continuous ? 1 : pages.count
+        if session.position.pageCapacity != max(1, count) {
+            let revision = session.navigationRevision
+            let layout = session.position.layout
+            // Publishing during a representable update is unsafe. Validate the
+            // result again after yielding so an old resize cannot overwrite a seek.
+            Task { @MainActor [weak self, weak session] in
+                guard let self, let session, self.session === session,
+                    session.navigationRevision == revision, session.position.layout == layout,
+                    (layout == .continuous ? 1 : self.comic.items.count) == count
+                else { return }
+                session.updateVisiblePageCount(count)
+            }
+        }
+    }
+
     func layoutComic(resetPosition: Bool) {
-        guard !layingOut, let session, !comic.items.isEmpty else { return }
+        guard !layingOut, let session else { return }
         let viewport = contentView.bounds.size
         guard viewport.width > 32, viewport.height > 32 else { return }
         layingOut = true
         defer { layingOut = false }
         let restoring = resetPosition || !hasLayout
         let saved = restoring ? (page: session.position.page, fraction: session.pageOffset) : anchor()
+        refreshVisiblePages()
+        guard !comic.items.isEmpty else { return }
         let oldWidth = max(1, comic.frame.width)
         let horizontal = contentView.bounds.midX / oldWidth
         var totalWidth: CGFloat = viewport.width
@@ -162,25 +207,45 @@ final class ComicScrollView: NSScrollView {
                 comic.items[i].rect.origin.x = (totalWidth - comic.items[i].rect.width) / 2
             }
         } else {
-            let naturalWidth = comic.items.reduce(CGFloat(0)) { $0 + $1.size.width }
-            let naturalHeight = comic.items.map { $0.size.height }.max() ?? 1
-            let scale: CGFloat
+            let gap = CGFloat(AdaptivePageLayout.gap)
+            let spacing = gap * CGFloat(max(0, comic.items.count - 1))
+            let aspects = comic.items.map { $0.size.width / $0.size.height }
+            let totalAspect = aspects.reduce(CGFloat(0), +)
+            let sizes: [NSSize]
+            let slotWidths: [CGFloat]
             switch session.zoom {
             case .page:
-                scale = min((viewport.width - 32) / naturalWidth, (viewport.height - 32) / naturalHeight)
-            case .width: scale = (viewport.width - 32) * session.widthRatio / naturalWidth
-            case .actual: scale = 1
-            case .custom(let value): scale = value
+                let slotAspects = aspects.map { CGFloat(AdaptivePageLayout.slotAspectRatio(Double($0))) }
+                let height = min(
+                    viewport.height - 32,
+                    max(1, viewport.width - 32 - spacing) / slotAspects.reduce(CGFloat(0), +))
+                slotWidths = slotAspects.map { $0 * height }
+                sizes = aspects.enumerated().map { index, aspect in
+                    let imageHeight = min(height, slotWidths[index] / aspect)
+                    return NSSize(width: aspect * imageHeight, height: imageHeight)
+                }
+            case .width:
+                let height = max(1, (viewport.width - 32) * session.widthRatio - spacing) / totalAspect
+                sizes = aspects.map { NSSize(width: $0 * height, height: height) }
+                slotWidths = sizes.map(\.width)
+            case .actual:
+                sizes = comic.items.map(\.size)
+                slotWidths = sizes.map(\.width)
+            case .custom(let scale):
+                sizes = comic.items.map { NSSize(width: $0.size.width * scale, height: $0.size.height * scale) }
+                slotWidths = sizes.map(\.width)
             }
-            totalWidth = max(totalWidth, naturalWidth * scale + 32)
-            totalHeight = max(totalHeight, naturalHeight * scale + 32)
-            var x = (totalWidth - naturalWidth * scale) / 2
+            let rowWidth = slotWidths.reduce(CGFloat(0), +) + spacing
+            let rowHeight = sizes.map(\.height).max() ?? 1
+            totalWidth = max(totalWidth, rowWidth + 32)
+            totalHeight = max(totalHeight, rowHeight + 32)
+            var x = (totalWidth - rowWidth) / 2
             for i in comic.items.indices {
-                let size = comic.items[i].size
+                let size = sizes[i]
                 comic.items[i].rect = NSRect(
-                    x: x, y: (totalHeight - size.height * scale) / 2,
-                    width: size.width * scale, height: size.height * scale)
-                x += size.width * scale
+                    x: x + (slotWidths[i] - size.width) / 2, y: (totalHeight - size.height) / 2,
+                    width: size.width, height: size.height)
+                x += slotWidths[i] + gap
             }
         }
         let newSize = NSSize(width: totalWidth, height: totalHeight)
@@ -198,7 +263,9 @@ final class ComicScrollView: NSScrollView {
             }
         }
         hasLayout = true
-        if let item = comic.items.first { session.displayedScale = item.rect.width / item.size.width }
+        if let item = comic.items.first(where: { $0.page == session.position.page }) {
+            session.displayedScale = item.rect.width / item.size.width
+        }
         comic.needsDisplay = true
         reflectScrolledClipView(contentView)
     }
@@ -253,6 +320,7 @@ final class ComicScrollView: NSScrollView {
                     else { return }
                     self.comic.items[index].image = image
                     self.comic.items[index].size = image.size
+                    self.measuredSizes[page] = image.size
                 } catch is CancellationError {} catch {
                     guard let self, self.tasks[page]?.0 == token,
                         let index = self.comic.items.firstIndex(where: { $0.page == page })

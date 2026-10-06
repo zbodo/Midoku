@@ -5,46 +5,84 @@ public enum ReadingDirection: String, Codable, CaseIterable, Sendable {
 }
 
 public enum PageLayout: String, Codable, CaseIterable, Sendable {
-    case single, spread, continuous
+    case adaptive, continuous
+
+    // Previous single/spread preferences now share the adaptive viewport.
+    public static func preference(_ value: String?) -> Self {
+        Self(rawValue: value ?? "") ?? .adaptive
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        switch value {
+        case "single", "spread", "adaptive": self = .adaptive
+        case "continuous": self = .continuous
+        default:
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown reading layout")
+        }
+    }
 }
 
 public struct ReadingPosition: Equatable, Sendable {
     public let count: Int
     public private(set) var page: Int
     public var layout: PageLayout
-    public var coverIsSingle: Bool
+    public var pageCapacity: Int
 
-    public init(count: Int, page: Int = 0, layout: PageLayout = .single, coverIsSingle: Bool = true) {
+    public init(count: Int, page: Int = 0, layout: PageLayout = .adaptive, pageCapacity: Int = 1) {
         self.count = max(0, count)
         self.page = min(max(0, page), max(0, count - 1))
         self.layout = layout
-        self.coverIsSingle = coverIsSingle
-        seek(self.page)
+        self.pageCapacity = max(1, pageCapacity)
     }
 
     public var visiblePages: [Int] {
         guard count > 0 else { return [] }
-        guard layout == .spread, !(coverIsSingle && page == 0), page + 1 < count else { return [page] }
-        return [page, page + 1]
+        let capacity = layout == .adaptive ? max(1, pageCapacity) : 1
+        return Array(page..<(page + min(capacity, count - page)))
     }
 
     public mutating func seek(_ value: Int) {
-        let clamped = min(max(0, value), max(0, count - 1))
-        if layout == .spread {
-            let start = coverIsSingle ? 1 : 0
-            page = clamped < start ? 0 : start + ((clamped - start) / 2) * 2
-        } else {
-            page = clamped
+        page = min(max(0, value), max(0, count - 1))
+    }
+
+    // Navigation moves the leading page, independently of viewport capacity.
+    public mutating func advance() { seek(page + 1) }
+    public mutating func retreat() { seek(page - 1) }
+}
+
+public enum AdaptivePageLayout {
+    public static let gap: Double = 12
+    public static let minimumPageWidth: Double = 320
+    public static let portraitAspectRatio: Double = 5.0 / 7.0
+
+    public static func pageSpan(aspectRatio: Double) -> Int {
+        aspectRatio.isFinite && aspectRatio > 1 ? 2 : 1
+    }
+
+    public static func slotAspectRatio(_ aspectRatio: Double) -> Double {
+        guard aspectRatio.isFinite, aspectRatio > 0 else { return portraitAspectRatio }
+        return pageSpan(aspectRatio: aspectRatio) == 2 ? portraitAspectRatio * 2 : aspectRatio
+    }
+
+    // Fit as many readable pages as possible at the viewport's available height.
+    // Unknown images use a portrait estimate until their dimensions are decoded.
+    public static func pageCount(width: Double, height: Double, aspectRatios: [Double]) -> Int {
+        guard !aspectRatios.isEmpty else { return 0 }
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else { return 1 }
+        var used: Double = 0
+        var count = 0
+        for aspect in aspectRatios {
+            let span = Double(pageSpan(aspectRatio: aspect))
+            let ratio = slotAspectRatio(aspect)
+            let idealWidth = max(min(minimumPageWidth * span, width), height * ratio)
+            let required = idealWidth + (count == 0 ? 0 : gap)
+            if count > 0 && used + required > width { break }
+            count += 1
+            used += required
         }
-    }
-
-    public mutating func advance() {
-        guard let last = visiblePages.last, last + 1 < count else { return }
-        seek(last + 1)
-    }
-
-    public mutating func retreat() {
-        seek(page - (layout == .spread ? 2 : 1))
+        return count
     }
 }
 

@@ -14,56 +14,103 @@ final class ReadingPositionTests: XCTestCase {
         XCTAssertEqual(ReadingPosition(count: 3, page: -1).page, 0)
     }
 
-    func testCoverAndSpreadAdvanceRetreat() {
-        var position = ReadingPosition(count: 6, layout: .spread)
-        XCTAssertEqual(position.visiblePages, [0])
+    func testAdaptiveWindowSlidesOnePageAtATime() {
+        var position = ReadingPosition(count: 6, pageCapacity: 3)
+        XCTAssertEqual(position.visiblePages, [0, 1, 2])
         position.advance()
-        XCTAssertEqual(position.visiblePages, [1, 2])
+        XCTAssertEqual(position.visiblePages, [1, 2, 3])
         position.advance()
-        XCTAssertEqual(position.visiblePages, [3, 4])
+        XCTAssertEqual(position.visiblePages, [2, 3, 4])
+        position.seek(4)
+        XCTAssertEqual(position.visiblePages, [4, 5])
         position.advance()
         XCTAssertEqual(position.visiblePages, [5])
         position.advance()
-        XCTAssertEqual(position.visiblePages, [5])
+        XCTAssertEqual(position.page, 5)
         position.retreat()
-        XCTAssertEqual(position.visiblePages, [3, 4])
-        position.retreat()
-        position.retreat()
-        XCTAssertEqual(position.visiblePages, [0])
+        XCTAssertEqual(position.visiblePages, [4, 5])
     }
 
-    func testSpreadWithoutSingleCoverAndSeekAlignment() {
-        var position = ReadingPosition(count: 5, layout: .spread, coverIsSingle: false)
-        XCTAssertEqual(position.visiblePages, [0, 1])
-        position.seek(3)
-        XCTAssertEqual(position.visiblePages, [2, 3])
-        position.advance()
-        XCTAssertEqual(position.visiblePages, [4])
-        position.retreat()
-        XCTAssertEqual(position.visiblePages, [2, 3])
+    func testResizingPreservesExactLeadingPageAndSeek() {
+        var position = ReadingPosition(count: 8, page: 3, pageCapacity: 2)
+        XCTAssertEqual(position.visiblePages, [3, 4])
+        position.pageCapacity = 4
+        XCTAssertEqual(position.page, 3)
+        XCTAssertEqual(position.visiblePages, [3, 4, 5, 6])
+        position.pageCapacity = 1
+        XCTAssertEqual(position.visiblePages, [3])
+        position.seek(5)
+        XCTAssertEqual(position.page, 5)
+        position.layout = .continuous
+        position.pageCapacity = 4
+        XCTAssertEqual(position.visiblePages, [5])
     }
 
     func testEveryPageIsReachableAndNavigationRoundTrips() {
         for count in 1...30 {
-            for cover in [false, true] {
-                var position = ReadingPosition(count: count, layout: .spread, coverIsSingle: cover)
-                var visited: [Int] = []
-                var starts: [Int] = []
-                repeat {
-                    starts.append(position.page)
-                    visited += position.visiblePages
-                    let oldPage = position.page
+            for capacity in 1...6 {
+                var position = ReadingPosition(count: count, pageCapacity: capacity)
+                for expected in 0..<count {
+                    XCTAssertEqual(position.page, expected)
+                    XCTAssertEqual(position.visiblePages.first, expected)
                     position.advance()
-                    if position.page == oldPage { break }
-                } while true
-                XCTAssertEqual(visited, Array(0..<count))
-                for expected in starts.dropLast().reversed() {
+                }
+                XCTAssertEqual(position.page, count - 1)
+                for expected in (0..<(count - 1)).reversed() {
                     position.retreat()
                     XCTAssertEqual(position.page, expected)
                 }
             }
         }
     }
+
+    func testAdaptiveCapacityRespondsToViewportAndImageRatios() {
+        let portraits = Array(repeating: 0.7, count: 8)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 500, height: 800, aspectRatios: portraits), 1)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1200, height: 800, aspectRatios: portraits), 2)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1800, height: 800, aspectRatios: portraits), 3)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1200, height: 1200, aspectRatios: portraits), 1)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1800, height: 800, aspectRatios: [1.5, 0.7, 0.7]), 2)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1800, height: 800, aspectRatios: [0.7]), 1)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1800, height: 800, aspectRatios: []), 0)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1, height: 800, aspectRatios: portraits), 1)
+        XCTAssertEqual(
+            AdaptivePageLayout.pageCount(width: 1200, height: 800, aspectRatios: [0.01, 0.01, 0.01, 0.01]), 3)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: .nan, height: 800, aspectRatios: portraits), 1)
+        for width in [1.0, 50, 200, 1000] {
+            XCTAssertEqual(AdaptivePageLayout.pageCount(width: width, height: 800, aspectRatios: [3, 3]), 1)
+        }
+    }
+
+    func testLandscapeImagesUseTwoSlotsButRemainOneNavigationPage() {
+        XCTAssertEqual(AdaptivePageLayout.pageSpan(aspectRatio: 0.7), 1)
+        XCTAssertEqual(AdaptivePageLayout.pageSpan(aspectRatio: 1), 1)
+        XCTAssertEqual(AdaptivePageLayout.pageSpan(aspectRatio: 1.01), 2)
+        XCTAssertEqual(AdaptivePageLayout.pageSpan(aspectRatio: 3), 2)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1500, height: 800, aspectRatios: [1.1, 0.7]), 1)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1800, height: 800, aspectRatios: [1.1, 0.7]), 2)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 1800, height: 800, aspectRatios: [3, 3]), 1)
+        XCTAssertEqual(AdaptivePageLayout.pageCount(width: 500, height: 800, aspectRatios: [3, 0.7]), 1)
+        XCTAssertEqual(AdaptivePageLayout.slotAspectRatio(3), AdaptivePageLayout.portraitAspectRatio * 2)
+        var position = ReadingPosition(count: 3, pageCapacity: 2)
+        position.advance()
+        XCTAssertEqual(position.page, 1)
+        position.retreat()
+        XCTAssertEqual(position.page, 0)
+    }
+
+    func testLegacyLayoutSettingsMigrateToAdaptive() throws {
+        for value in ["single", "spread", "adaptive"] {
+            XCTAssertEqual(PageLayout.preference(value), .adaptive)
+            let data = try JSONEncoder().encode(value)
+            XCTAssertEqual(try JSONDecoder().decode(PageLayout.self, from: data), .adaptive)
+        }
+        XCTAssertEqual(PageLayout.preference("continuous"), .continuous)
+        XCTAssertEqual(PageLayout.allCases, [.adaptive, .continuous])
+        XCTAssertEqual(
+            try JSONDecoder().decode(PageLayout.self, from: JSONEncoder().encode(PageLayout.adaptive)), .adaptive)
+    }
+
 }
 
 final class PageCatalogTests: XCTestCase {

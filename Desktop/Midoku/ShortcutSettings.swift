@@ -72,7 +72,7 @@ struct DesktopSettingsView: View {
     @State private var recording: ReaderAction?
     @State private var errorMessage: String?
     @AppStorage("desktop.direction") private var direction = ReadingDirection.rightToLeft.rawValue
-    @AppStorage("desktop.layout") private var layout = PageLayout.single.rawValue
+    @AppStorage("desktop.layout") private var layout = PageLayout.adaptive.rawValue
     @AppStorage("desktop.background") private var background = "dark"
 
     var body: some View {
@@ -83,8 +83,7 @@ struct DesktopSettingsView: View {
                     Text("Left to Right").tag(ReadingDirection.leftToRight.rawValue)
                 }
                 Picker("Default Layout", selection: $layout) {
-                    Text("Single Page").tag(PageLayout.single.rawValue)
-                    Text("Two Pages").tag(PageLayout.spread.rawValue)
+                    Text("Adaptive Pages").tag(PageLayout.adaptive.rawValue)
                     Text("Continuous").tag(PageLayout.continuous.rawValue)
                 }
                 Picker("Reader Background", selection: $background) {
@@ -103,6 +102,7 @@ struct DesktopSettingsView: View {
                 .padding(24)
                 .tabItem { Label("Keyboard", systemImage: "keyboard") }
         }
+        .onAppear { layout = PageLayout.preference(layout).rawValue }
         .frame(width: 740, height: 620)
         .alert(
             "Shortcut Unavailable",

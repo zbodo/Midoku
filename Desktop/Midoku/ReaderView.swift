@@ -197,7 +197,7 @@ struct ReaderWindowView: View {
                             Image(systemName: "forward.end")
                         }
                         .help("Next Page").disabled(
-                            session.position.visiblePages.last == session.position.count - 1)
+                            session.position.page >= session.position.count - 1)
                     }
                     .buttonStyle(.borderless)
                     .padding(.horizontal, 20).padding(.vertical, 10)
@@ -272,8 +272,7 @@ struct ReaderWindowView: View {
                 "Page Layout",
                 selection: Binding(get: { session.position.layout }, set: { session.setLayout($0) })
             ) {
-                Text("Single Page").tag(PageLayout.single)
-                Text("Two Pages").tag(PageLayout.spread)
+                Text("Adaptive Pages").tag(PageLayout.adaptive)
                 Text("Continuous").tag(PageLayout.continuous)
             }.frame(width: 130)
             Menu {
@@ -281,10 +280,6 @@ struct ReaderWindowView: View {
                     Text("Right to Left").tag(ReadingDirection.rightToLeft)
                     Text("Left to Right").tag(ReadingDirection.leftToRight)
                 }
-                Toggle(
-                    "Single Cover Page",
-                    isOn: Binding(
-                        get: { session.position.coverIsSingle }, set: { session.setSingleCover($0) }))
                 Divider()
                 ForEach([ReaderAction.fitPage, .fitWidth, .actualSize, .zoomIn, .zoomOut], id: \.self) {
                     action in
@@ -314,7 +309,7 @@ struct ReaderWindowView: View {
         .accessibilityLabel(next ? "Next Page" : "Previous Page")
         .disabled(
             next
-                ? session.position.visiblePages.last == session.position.count - 1
+                ? session.position.page >= session.position.count - 1
                 : session.position.page == 0)
     }
 
@@ -430,18 +425,13 @@ struct ReaderOptionsPanel: View {
                     "Page Layout",
                     selection: Binding(get: { session.position.layout }, set: { session.setLayout($0) })
                 ) {
-                    Text("Single Page").tag(PageLayout.single)
-                    Text("Two Pages").tag(PageLayout.spread)
+                    Text("Adaptive Pages").tag(PageLayout.adaptive)
                     Text("Continuous").tag(PageLayout.continuous)
                 }
                 Picker("Reading Direction", selection: $session.direction) {
                     Text("Right to Left").tag(ReadingDirection.rightToLeft)
                     Text("Left to Right").tag(ReadingDirection.leftToRight)
                 }
-                Toggle(
-                    "Single Cover Page",
-                    isOn: Binding(
-                        get: { session.position.coverIsSingle }, set: { session.setSingleCover($0) }))
                 ReaderInputSettings()
                 Text(
                     "A / D and arrow keys navigate pages. Space scrolls a screen in continuous mode. Q shows controls, T opens thumbnails, F opens the page overview."
