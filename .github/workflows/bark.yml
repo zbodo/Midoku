@@ -4,7 +4,6 @@ on:
   workflow_run:
     workflows:
       - macOS Desktop
-      - Build native macOS app
       - SwiftLint
       - Legacy AltStore Source (manual only)
     types: [completed]
