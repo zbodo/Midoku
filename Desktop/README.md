@@ -1,19 +1,19 @@
 # Midoku for macOS
 
-The app uses AppKit and SwiftUI directly, requires **macOS 14+**, and has separate
+The app uses AppKit and SwiftUI directly, requires **Apple Silicon and macOS 14+**, and has separate
 library, source browser, manga details, website and reader windows. Open
 **Midoku.xcodeproj**, select **Midoku**, and run on **My Mac** in **Xcode 16+**.
 Select a development team to run a signed sandboxed build.
 
-Debug builds use `ONLY_ACTIVE_ARCH = YES`, so the app and Swift Package
-dependencies build for the selected Mac's architecture. Release builds use
-`ONLY_ACTIVE_ARCH = NO`; the nightly workflow builds for the generic macOS
-destination and checks that the app contains both arm64 and x86_64.
+Debug and Release builds set `ARCHS = arm64`. CI also passes `ARCHS=arm64`
+explicitly so the app, tests and Swift Package dependencies use the same
+architecture. The nightly workflow checks the app's arm64 architecture before
+packaging it. Intel Macs are not supported.
 
 If Xcode reports `Unable to resolve module dependency` together with
 `built for incompatible target`, inspect the target triples in the build log.
-An x86_64 app compile cannot import arm64-only package modules. Pull the latest
-project configuration, select **My Mac**, then use **Product → Clean Build
+Pull the latest project configuration, select **My Mac** on an Apple Silicon
+Mac, then use **Product → Clean Build
 Folder** before rebuilding. Package resolution succeeding does not verify
 that the app and its dependencies were built for matching architectures.
 
@@ -108,9 +108,9 @@ RAR/CBR and download queues remain outside this native implementation.
 ```sh
 swift test --package-path Desktop/Core
 xcodebuild -project Midoku.xcodeproj -scheme Midoku \
-  -destination 'platform=macOS' -derivedDataPath build/Desktop \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath build/Desktop \
   -skipPackagePluginValidation -onlyUsePackageVersionsFromResolvedFile \
-  CODE_SIGNING_ALLOWED=NO test
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test
 ```
 
 The macOS workflow runs both checks; nightly builds create an unsigned app ZIP.

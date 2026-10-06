@@ -22,9 +22,9 @@ jobs:
       - name: Build and test native app
         run: |
           xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath build/Desktop \
+            -destination 'platform=macOS,arch=arm64' -derivedDataPath build/Desktop \
             -skipPackagePluginValidation -onlyUsePackageVersionsFromResolvedFile \
-            CODE_SIGNING_ALLOWED=NO test
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
