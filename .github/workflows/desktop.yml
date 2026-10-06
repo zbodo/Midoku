@@ -8,17 +8,30 @@ on:
     paths: ["Desktop/**", "Midoku.xcodeproj/**", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+
 jobs:
   core:
-    runs-on: macos-15
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v5
+      - name: Show build environment
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun swift --version
       - name: Test portable desktop core
         run: swift test --package-path Desktop/Core
   desktop:
-    runs-on: macos-15
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v5
+      - name: Show build environment
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun swift --version
       - name: Build and test native app
         run: |
           xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \

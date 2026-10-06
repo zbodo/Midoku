@@ -10,6 +10,12 @@ explicitly so the app, tests and Swift Package dependencies use the same
 architecture. The nightly workflow checks the app's arm64 architecture before
 packaging it. Intel Macs are not supported.
 
+CI builds and tests use GitHub's `xcode-27` Apple Silicon runner (macOS 27)
+with Xcode 27.1 selected via `DEVELOPER_DIR`. This runner image is currently
+in public preview; Xcode 27.2 Beta is not selected. Each job prints the actual
+macOS, Xcode and Swift versions. Available versions are listed in the
+[runner image documentation](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md).
+
 If Xcode reports `Unable to resolve module dependency` together with
 `built for incompatible target`, inspect the target triples in the build log.
 Pull the latest project configuration, select **My Mac** on an Apple Silicon
