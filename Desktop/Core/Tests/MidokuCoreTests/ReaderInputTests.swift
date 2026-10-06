@@ -19,12 +19,12 @@ final class ReaderInputTests: XCTestCase {
     }
     func testTrackpadTurnsOnceAndIgnoresMomentum() {
         var gate = WheelTurnGate()
-        XCTAssertNil(
-            gate.consume(
-                delta: 25, time: 1, precise: true, began: true, ended: false, momentum: false, canScroll: false))
         XCTAssertEqual(
             gate.consume(
-                delta: 25, time: 1.01, precise: true, began: false, ended: false, momentum: false, canScroll: false), 1)
+                delta: 0.1, time: 1, precise: true, began: true, ended: false, momentum: false, canScroll: false), 1)
+        XCTAssertNil(
+            gate.consume(
+                delta: 25, time: 1.01, precise: true, began: false, ended: false, momentum: false, canScroll: false))
         XCTAssertNil(
             gate.consume(
                 delta: 100, time: 1.02, precise: true, began: false, ended: false, momentum: false, canScroll: false))
@@ -47,14 +47,15 @@ final class ReaderInputTests: XCTestCase {
             gate.consume(
                 delta: 100, time: 2, precise: true, began: true, ended: false, momentum: false, canScroll: false), 1)
     }
-    func testDiscreteMouseBurstAndDirectionReversal() {
+    func testEachDiscreteWheelNotchTurnsImmediately() {
         var gate = WheelTurnGate()
         XCTAssertEqual(
             gate.consume(
                 delta: 3, time: 1, precise: false, began: false, ended: false, momentum: false, canScroll: false), 1)
-        XCTAssertNil(
+        XCTAssertEqual(
             gate.consume(
-                delta: 3, time: 1.1, precise: false, began: false, ended: false, momentum: false, canScroll: false))
+                delta: 0.1, time: 1.01, precise: false, began: false, ended: false, momentum: false, canScroll: false),
+            1)
         XCTAssertEqual(
             gate.consume(
                 delta: -3, time: 1.4, precise: false, began: false, ended: false, momentum: false, canScroll: false), -1
@@ -90,4 +91,14 @@ final class ReaderInputTests: XCTestCase {
         XCTAssertNil(
             try decoder.decode(ComicBook.self, from: JSONSerialization.data(withJSONObject: object)).pageOffset)
     }
+    func testPrefetchBoundsAndNeighbourCoverage() {
+        XCTAssertEqual(ReaderPrefetchPolicy.pages(count: 0, page: 0, visibleCount: 1), [])
+        XCTAssertEqual(ReaderPrefetchPolicy.pages(count: 20, page: 5, visibleCount: 3), Array(3...9))
+        XCTAssertEqual(ReaderPrefetchPolicy.pages(count: 20, page: 0, visibleCount: 3), Array(0...4))
+        XCTAssertEqual(ReaderPrefetchPolicy.pages(count: 20, page: 19, visibleCount: 3), [17, 18, 19])
+        XCTAssertEqual(ReaderPrefetchPolicy.pages(count: 20, page: 5, visibleCount: 3, extraPages: 0), [5, 6, 7])
+        XCTAssertEqual(ReaderPrefetchPolicy.pages(count: 20, page: 5, visibleCount: 3, extraPages: 4), Array(1...11))
+        XCTAssertEqual(ReaderPrefetchPolicy.pages(count: 20, page: 5, visibleCount: 3, extraPages: -1), [5, 6, 7])
+    }
+
 }

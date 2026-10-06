@@ -74,8 +74,10 @@ final class ReaderSession: ObservableObject {
         saveProgress()
     }
 
-    func seek(_ page: Int) {
+    func seek(_ page: Int, hideControls: Bool = true) {
+        let oldPage = position.page
         position.seek(page)
+        if hideControls, position.page != oldPage { chromeVisible = false }
         pageOffset = 0
         reachedViewportEnd = false
         navigationRevision = UUID()

@@ -1,14 +1,16 @@
 import AppKit
 import MidokuCore
+import QuartzCore
 import SwiftUI
 
 // Adaptive paging and continuous reading share the native viewport and input rules.
 struct ReaderCanvas: NSViewRepresentable {
     @ObservedObject var session: ReaderSession
     let background: NSColor
+    @AppStorage("reader.preloadPages") private var preloadPages = 2
     func makeNSView(context: Context) -> ComicScrollView { ComicScrollView(frame: .zero) }
     func updateNSView(_ scroll: ComicScrollView, context: Context) {
-        scroll.configure(session: session, background: background)
+        scroll.configure(session: session, background: background, preloadPages: preloadPages)
     }
     static func dismantleNSView(_ scroll: ComicScrollView, coordinator: ()) { scroll.stop() }
 }
@@ -24,17 +26,26 @@ final class ComicScrollView: NSScrollView {
     private var bookID: UUID?
     private var paths: [String] = []
     private var measuredSizes: [Int: NSSize] = [:]
+    private let decoded = NSCache<NSNumber, NSImage>()
+    private var failedPages: Set<Int> = []
+    private var prefetched: Set<Int> = []
+    private var extraPreloadPages = 2
+    private var renderedPage: Int?
+    private var transition: ComicTransitionView?
+    private var transitionDirection: CGFloat = 1
+    private var transitionTask: Task<Void, Never>?
+    private var transitionPending = false
     private var mode: PageLayout?
     private var ordering: ReadingDirection?
     private var layingOut = false
     private var hasLayout = false
     private var wheel = WheelTurnGate()
-    private var lastNavigation: TimeInterval = 0
     var displayedPages: [Int] { comic.items.map(\.page) }
 
     override var acceptsFirstResponder: Bool { true }
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        decoded.totalCostLimit = 128 * 1024 * 1024
         hasVerticalScroller = true
         hasHorizontalScroller = true
         autohidesScrollers = true
@@ -45,7 +56,8 @@ final class ComicScrollView: NSScrollView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(session: ReaderSession, background: NSColor) {
+    func configure(session: ReaderSession, background: NSColor, preloadPages: Int = 2) {
+        extraPreloadPages = min(20, max(0, preloadPages))
         self.session = session
         session.viewport = self
         session.window = window
@@ -57,10 +69,21 @@ final class ComicScrollView: NSScrollView {
         let structureChanged =
             bookID != book.id || paths != book.pages || mode != session.position.layout
             || ordering != session.direction
+        if navigated, !structureChanged, !reload, session.position.layout == .adaptive,
+            let previous = renderedPage, previous != session.position.page
+        {
+            beginTransition(from: previous, to: session.position.page)
+        } else if structureChanged || reload {
+            clearTransition()
+        }
+        renderedPage = session.position.page
         revision = session.navigationRevision
         reloadToken = session.reloadToken
         if bookID != book.id || paths != book.pages || reload {
             measuredSizes = [:]
+            decoded.removeAllObjects()
+            failedPages = []
+            prefetched = []
         }
         if structureChanged || reload {
             hasLayout = false
@@ -75,6 +98,7 @@ final class ComicScrollView: NSScrollView {
         ordering = session.direction
         layoutComic(resetPosition: navigated || structureChanged)
         loadVisiblePages()
+        finishTransition()
     }
 
     override func viewDidMoveToWindow() {
@@ -93,6 +117,8 @@ final class ComicScrollView: NSScrollView {
         }
     }
     func stop() {
+        clearTransition()
+        decoded.removeAllObjects()
         comic.cancelClick()
         for pending in tasks.values { pending.1.cancel() }
         tasks = [:]
@@ -143,15 +169,14 @@ final class ComicScrollView: NSScrollView {
         }
         let old = Dictionary(uniqueKeysWithValues: comic.items.map { ($0.page, $0) })
         if displayedPages != pages {
-            let wanted = Set(pages)
-            for page in Array(tasks.keys) where !wanted.contains(page) {
-                tasks.removeValue(forKey: page)?.1.cancel()
-            }
+
             comic.cancelClick()
             comic.items = pages.map { page in
                 if let previous = old[page] { return previous }
                 var item = ComicPageItem(page: page, url: session.library.pageURL(for: book, at: page))
                 if let size = measuredSizes[page] { item.size = size }
+                item.image = decoded.object(forKey: NSNumber(value: page))
+                item.failed = failedPages.contains(page)
                 return item
             }
         }
@@ -266,6 +291,7 @@ final class ComicScrollView: NSScrollView {
         if let item = comic.items.first(where: { $0.page == session.position.page }) {
             session.displayedScale = item.rect.width / item.size.width
         }
+        comic.updateLoadingIndicators()
         comic.needsDisplay = true
         reflectScrolledClipView(contentView)
     }
@@ -286,6 +312,7 @@ final class ComicScrollView: NSScrollView {
     private func scrolled() {
         guard !layingOut, window != nil else { return }
         loadVisiblePages()
+        comic.updateLoadingIndicators()
         let current = anchor()
         session?.didScroll(
             page: current.page, offset: current.fraction,
@@ -293,21 +320,51 @@ final class ComicScrollView: NSScrollView {
     }
 
     private func loadVisiblePages() {
-        guard window != nil, !layingOut else { return }
-        let range = contentView.bounds.insetBy(dx: 0, dy: -contentView.bounds.height)
-        let wanted = Set(comic.items.filter { $0.rect.intersects(range) }.map(\.page))
+        guard window != nil, !layingOut, let session, let book = session.book else { return }
+        let range = contentView.bounds
+        let visible = comic.items.filter { $0.rect.intersects(range) }.map(\.page)
+        let nearby: [Int]
+        if session.position.layout == .adaptive {
+            nearby = ReaderPrefetchPolicy.pages(
+                count: book.pages.count, page: session.position.page, visibleCount: comic.items.count,
+                extraPages: extraPreloadPages)
+        } else {
+            let first = visible.min() ?? session.position.page
+            let last = visible.max() ?? first
+            nearby = ReaderPrefetchPolicy.pages(
+                count: book.pages.count, page: first, visibleCount: last - first + 1,
+                extraPages: extraPreloadPages)
+        }
+        let wanted = Set(nearby)
+        prefetched.formIntersection(wanted)
         for page in Array(tasks.keys) where !wanted.contains(page) {
             tasks.removeValue(forKey: page)?.1.cancel()
         }
-        // Release distant decoded images while retaining their measured geometry.
         for i in comic.items.indices where !wanted.contains(comic.items[i].page) {
             comic.items[i].image = nil
         }
-        for item in comic.items where wanted.contains(item.page) && item.image == nil && !item.failed {
+        // Current pages always get the limited decoding slots before neighbours.
+        let priority =
+            visible
+            + nearby.filter { !visible.contains($0) }.sorted {
+                abs($0 - session.position.page) < abs($1 - session.position.page)
+            }
+        for page in priority {
+            if let image = decoded.object(forKey: NSNumber(value: page)) {
+                if let index = comic.items.firstIndex(where: { $0.page == page }) {
+                    comic.items[index].image = image
+                    comic.items[index].size = image.size
+                }
+                continue
+            }
+            if comic.items.contains(where: { $0.page == page && $0.image != nil }) { continue }
+            if !visible.contains(page), prefetched.contains(page) { continue }
             guard tasks.count < 4 else { break }
-            guard tasks[item.page] == nil, let url = item.url else { continue }
-            let page = item.page
+            guard tasks[page] == nil, !failedPages.contains(page),
+                let url = session.library.pageURL(for: book, at: page)
+            else { continue }
             let token = UUID()
+            prefetched.insert(page)
             let task = Task { @MainActor [weak self] in
                 do {
                     let preview = try await PageImages.shared.preview(for: url)
@@ -315,25 +372,84 @@ final class ComicScrollView: NSScrollView {
                     guard let image = preview.image(), image.size.width > 0, image.size.height > 0 else {
                         throw ImportFailure.empty
                     }
-                    guard let self, self.tasks[page]?.0 == token,
-                        let index = self.comic.items.firstIndex(where: { $0.page == page })
-                    else { return }
-                    self.comic.items[index].image = image
-                    self.comic.items[index].size = image.size
+                    guard let self, self.tasks[page]?.0 == token else { return }
+                    let pixels =
+                        image.representations.map {
+                            max(1, $0.pixelsWide) * max(1, $0.pixelsHigh)
+                        }.max() ?? 1
+                    self.decoded.setObject(image, forKey: NSNumber(value: page), cost: pixels * 4)
                     self.measuredSizes[page] = image.size
+                    if let index = self.comic.items.firstIndex(where: { $0.page == page }) {
+                        self.comic.items[index].image = image
+                        self.comic.items[index].size = image.size
+                    }
                 } catch is CancellationError {} catch {
-                    guard let self, self.tasks[page]?.0 == token,
-                        let index = self.comic.items.firstIndex(where: { $0.page == page })
-                    else { return }
-                    self.comic.items[index].failed = true
+                    guard let self, self.tasks[page]?.0 == token else { return }
+                    self.failedPages.insert(page)
+                    if let index = self.comic.items.firstIndex(where: { $0.page == page }) {
+                        self.comic.items[index].failed = true
+                    }
                 }
                 guard let self, self.tasks[page]?.0 == token else { return }
                 self.tasks[page] = nil
                 self.layoutComic(resetPosition: false)
                 self.scrolled()
+                self.finishTransition()
             }
             tasks[page] = (token, task)
         }
+    }
+
+    private func transitionPages() -> [ComicTransitionPage] {
+        comic.items.map { item in
+            let rect = comic.convert(item.rect, to: contentView)
+            return ComicTransitionPage(
+                page: item.page, image: item.image,
+                rect: rect.offsetBy(dx: -contentView.bounds.minX, dy: -contentView.bounds.minY))
+        }
+    }
+    private func beginTransition(from previous: Int, to next: Int) {
+        if transitionPending, transition != nil {
+            transitionDirection = (next > previous ? 1 : -1) * (session?.direction == .rightToLeft ? 1 : -1)
+            return
+        }
+        let pages = transition?.snapshotPages ?? transitionPages()
+        // An interrupted animation is replaced by the most recent target;
+        // never queue keyboard repeats behind a long animation.
+        clearTransition()
+        guard !pages.isEmpty else { return }
+        let overlay = ComicTransitionView(frame: contentView.frame)
+        overlay.wantsLayer = true
+        overlay.layer?.masksToBounds = true
+        overlay.layer?.isGeometryFlipped = true
+        overlay.layer?.backgroundColor = backgroundColor.cgColor
+        overlay.show(pages)
+        addSubview(overlay, positioned: .above, relativeTo: contentView)
+        transition = overlay
+        transitionPending = true
+        transitionDirection = (next > previous ? 1 : -1) * (session?.direction == .rightToLeft ? 1 : -1)
+        // Placeholder pages participate in the turn and retain a live spinner.
+    }
+    private func finishTransition() {
+        guard transitionPending, let overlay = transition else { return }
+        transitionPending = false
+        let incoming = transitionPages()
+        if comic.items.contains(where: { $0.failed }) || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            clearTransition()
+            return
+        }
+        overlay.animate(to: incoming, direction: transitionDirection)
+        transitionTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(260)) } catch { return }
+            self?.clearTransition()
+        }
+    }
+    private func clearTransition() {
+        transitionTask?.cancel()
+        transitionTask = nil
+        transition?.removeFromSuperview()
+        transition = nil
+        transitionPending = false
     }
     func click(at point: NSPoint) {
         guard let session else { return }
@@ -357,6 +473,7 @@ final class ComicScrollView: NSScrollView {
         guard let index = comic.items.firstIndex(where: { $0.failed && $0.rect.contains(point) }) else {
             return false
         }
+        failedPages.remove(comic.items[index].page)
         comic.items[index].failed = false
         loadVisiblePages()
         return true
@@ -394,8 +511,7 @@ final class ComicScrollView: NSScrollView {
             super.scrollWheel(with: event)
             return
         }
-        if let turn, event.timestamp - lastNavigation > 0.22 {
-            lastNavigation = event.timestamp
+        if let turn {
             // Reversal is for wheel paging of fitted pages; a tall/zoomed page
             // advances in its scroll direction once a new boundary gesture starts.
             let reversed =
@@ -424,8 +540,8 @@ private final class ComicDocumentView: NSView {
     weak var viewport: ComicScrollView?
     var items: [ComicPageItem] = []
     var pageBackground = NSColor.black
+    private var loadingIndicators: [Int: NSProgressIndicator] = [:]
     private var press: ReaderClickCandidate?
-    private var pendingClick: Task<Void, Never>?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
@@ -436,21 +552,37 @@ private final class ComicDocumentView: NSView {
                 image.draw(
                     in: item.rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
                     hints: nil)
-            } else {
-                let text =
-                    item.failed
-                    ? String(localized: "Page could not be decoded. Click to retry.")
-                    : String(localized: "Loading page…")
-                (text as NSString).draw(
+            } else if item.failed {
+                (String(localized: "Page could not be decoded. Click to retry.") as NSString).draw(
                     at: NSPoint(x: item.rect.minX + 16, y: max(visibleRect.minY + 24, item.rect.minY + 24)),
                     withAttributes: [.foregroundColor: NSColor.secondaryLabelColor])
             }
         }
     }
-    func cancelClick() {
-        pendingClick?.cancel()
-        pendingClick = nil
+    func updateLoadingIndicators() {
+        let loading = items.filter { $0.image == nil && !$0.failed && $0.rect.intersects(visibleRect) }
+        let wanted = Set(loading.map(\.page))
+        for page in Array(loadingIndicators.keys) where !wanted.contains(page) {
+            loadingIndicators.removeValue(forKey: page)?.removeFromSuperview()
+        }
+        for item in loading {
+            let indicator: NSProgressIndicator
+            if let existing = loadingIndicators[item.page] {
+                indicator = existing
+            } else {
+                indicator = NSProgressIndicator()
+                indicator.style = .spinning
+                indicator.isIndeterminate = true
+                indicator.setAccessibilityLabel(String(localized: "Loading page…"))
+                addSubview(indicator)
+                indicator.startAnimation(nil)
+                loadingIndicators[item.page] = indicator
+            }
+            let area = item.rect.intersection(visibleRect)
+            indicator.frame = NSRect(x: area.midX - 16, y: area.midY - 16, width: 32, height: 32)
+        }
     }
+    func cancelClick() { press = nil }
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(viewport)
         cancelClick()
@@ -465,18 +597,7 @@ private final class ComicDocumentView: NSView {
         guard press?.isClick == true else { return }
         let point = convert(event.locationInWindow, from: nil)
         if viewport?.retry(at: point) == true { return }
-        if event.clickCount >= 2 {
-            cancelClick()
-            viewport?.preview(at: point)
-            return
-        }
-        pendingClick = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(NSEvent.doubleClickInterval)) } catch { return }
-            guard let self, self.window?.isKeyWindow == true, self.window?.attachedSheet == nil else {
-                return
-            }
-            self.viewport?.click(at: point)
-        }
+        viewport?.click(at: point)
     }
     override func menu(for event: NSEvent) -> NSMenu? {
         cancelClick()
@@ -506,5 +627,89 @@ private final class ComicDocumentView: NSView {
         guard let raw = sender.representedObject as? String, let action = ReaderAction(rawValue: raw)
         else { return }
         viewport?.session?.perform(action)
+    }
+}
+
+private struct ComicTransitionPage {
+    let page: Int
+    let image: NSImage?
+    let rect: NSRect
+}
+
+@MainActor
+private final class ComicTransitionView: NSView {
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    private var pages: [ComicTransitionPage] = []
+    private var imageLayers: [Int: CALayer] = [:]
+    var snapshotPages: [ComicTransitionPage] {
+        pages.map { page in
+            ComicTransitionPage(
+                page: page.page, image: page.image,
+                rect: imageLayers[page.page]?.presentation()?.frame ?? page.rect)
+        }
+    }
+
+    func show(_ pages: [ComicTransitionPage]) {
+        self.pages = pages
+        for page in pages {
+            let imageLayer = CALayer()
+            imageLayer.contents = page.image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            imageLayer.contentsGravity = .resizeAspect
+            imageLayer.frame = page.rect
+            layer?.addSublayer(imageLayer)
+            imageLayers[page.page] = imageLayer
+        }
+    }
+    func animate(to incoming: [ComicTransitionPage], direction: CGFloat) {
+        for page in incoming where page.image == nil {
+            let indicator = NSProgressIndicator()
+            indicator.style = .spinning
+            indicator.isIndeterminate = true
+            let area = page.rect.intersection(bounds)
+            guard !area.isEmpty else { continue }
+            indicator.frame = NSRect(x: area.midX - 16, y: area.midY - 16, width: 32, height: 32)
+            addSubview(indicator)
+            indicator.startAnimation(nil)
+        }
+        let distance = pages.first.map { $0.rect.width + CGFloat(AdaptivePageLayout.gap) } ?? bounds.width
+        let destinations = Dictionary(uniqueKeysWithValues: incoming.map { ($0.page, $0) })
+        for old in pages {
+            guard let imageLayer = imageLayers[old.page] else { continue }
+            let end = destinations[old.page]?.rect ?? old.rect.offsetBy(dx: direction * distance, dy: 0)
+            move(imageLayer, from: old.rect, to: end, disappearing: destinations[old.page] == nil)
+        }
+        for page in incoming where imageLayers[page.page] == nil {
+            let imageLayer = CALayer()
+            imageLayer.contents = page.image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            imageLayer.contentsGravity = .resizeAspect
+            layer?.addSublayer(imageLayer)
+            imageLayers[page.page] = imageLayer
+            move(
+                imageLayer, from: page.rect.offsetBy(dx: -direction * distance, dy: 0),
+                to: page.rect, disappearing: false)
+        }
+        pages = incoming
+    }
+    private func move(_ imageLayer: CALayer, from start: NSRect, to end: NSRect, disappearing: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        imageLayer.frame = end
+        imageLayer.opacity = disappearing ? 0 : 1
+        CATransaction.commit()
+        let position = CABasicAnimation(keyPath: "position")
+        position.fromValue = NSValue(point: NSPoint(x: start.midX, y: start.midY))
+        position.toValue = NSValue(point: NSPoint(x: end.midX, y: end.midY))
+        let size = CABasicAnimation(keyPath: "bounds.size")
+        size.fromValue = NSValue(size: start.size)
+        size.toValue = NSValue(size: end.size)
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 1
+        opacity.toValue = disappearing ? 0 : 1
+        let group = CAAnimationGroup()
+        group.animations = [position, size, opacity]
+        group.duration = 0.25
+        group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        imageLayer.add(group, forKey: "pageTurn")
     }
 }

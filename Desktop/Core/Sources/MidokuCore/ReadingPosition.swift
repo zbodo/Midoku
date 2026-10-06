@@ -102,9 +102,7 @@ public enum ReaderInputPolicy {
 
 public struct WheelTurnGate: Sendable {
     private var lastEvent: Double?
-    private var accumulated: Double = 0
     private var turned = false
-    private var direction: Double = 0
     public init() {}
     public mutating func reset() { self = Self() }
     // A burst must start at the boundary: scrolling to the edge cannot turn in
@@ -113,28 +111,19 @@ public struct WheelTurnGate: Sendable {
         delta: Double, time: Double, precise: Bool,
         began: Bool, ended: Bool, momentum: Bool, canScroll: Bool, phased: Bool = false
     ) -> Int? {
-        let newBurst = began || lastEvent == nil || (!phased && !momentum && time - (lastEvent ?? time) > 0.22)
+        let newBurst =
+            !precise || began || lastEvent == nil || (!phased && !momentum && time - (lastEvent ?? time) > 0.22)
         if newBurst {
-            accumulated = 0
             turned = false
-            direction = 0
         }
         lastEvent = time
         if canScroll {
             turned = true
-            accumulated = 0
             return nil
         }
         guard !momentum, !turned, !ended, delta != 0 else { return nil }
-        let sign: Double = delta > 0 ? 1 : -1
-        if sign != direction {
-            accumulated = 0
-            direction = sign
-        }
-        accumulated += abs(delta)
-        guard accumulated >= (precise ? 45 : 1) else { return nil }
-        turned = true
-        return sign > 0 ? 1 : -1
+        turned = precise
+        return delta > 0 ? 1 : -1
     }
 }
 
@@ -148,5 +137,15 @@ public struct ReaderClickCandidate: Sendable {
     }
     public mutating func move(x: Double, y: Double) {
         if hypot(x - self.x, y - self.y) > 5 { isClick = false }
+    }
+}
+
+public enum ReaderPrefetchPolicy {
+    public static func pages(count: Int, page: Int, visibleCount: Int, extraPages: Int = 2) -> [Int] {
+        guard count > 0 else { return [] }
+        let current = min(max(0, page), count - 1)
+        let visible = min(max(1, visibleCount), count - current)
+        let extra = min(20, max(0, extraPages))
+        return Array(max(0, current - extra)..<min(count, current + visible + extra))
     }
 }

@@ -85,8 +85,7 @@ struct ReaderWindowView: View {
             .navigationTitle(session.title)
             .navigationSubtitle(session.pageLabel)
             .focusedSceneValue(\.readerSession, session)
-            .toolbar(session.chromeVisible ? .visible : .hidden, for: .windowToolbar)
-            .toolbar { readerToolbar }
+            .toolbar(.hidden, for: .windowToolbar)
             .onAppear {
                 session.revealLibrary = { openWindow(id: "library") }
                 if !hintsSeen { showHelp = true }
@@ -149,9 +148,33 @@ struct ReaderWindowView: View {
                 .frame(width: 210)
                 Divider()
             }
-            VStack(spacing: 0) {
-                ZStack {
-                    ReaderCanvas(session: session, background: color)
+            ReaderCanvas(session: session, background: color)
+                .ignoresSafeArea(.container, edges: .top)
+                .overlay(alignment: .top) {
+                    if session.chromeVisible {
+                        ViewThatFits(in: .horizontal) {
+                            readerToolbar
+                            compactReaderToolbar
+                        }
+                        .buttonStyle(.borderless)
+                        .labelStyle(.iconOnly)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .modifier(ReaderGlassSurface())
+                        .padding(.horizontal, 12).padding(.top, 32)
+                        .transition(.opacity)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if session.chromeVisible {
+                        readerProgress
+                            .padding(.horizontal, 16).padding(.vertical, 10)
+                            .modifier(ReaderGlassSurface())
+                            .frame(maxWidth: 640)
+                            .padding(16)
+                            .transition(.opacity)
+                    }
+                }
+                .overlay {
                     if session.chromeVisible, session.position.layout != .continuous {
                         HStack {
                             pageButton(left: true)
@@ -159,139 +182,164 @@ struct ReaderWindowView: View {
                             pageButton(left: false)
                         }.padding(16)
                     }
-                    if !session.chromeVisible {
-                        VStack {
-                            HStack {
-                                Spacer()
-                                Button {
-                                    session.chromeVisible = true
-                                } label: {
-                                    Image(systemName: "toolbar")
-                                }
-                                .buttonStyle(.bordered).help("Show Controls")
-                            }
-                            Spacer()
-                        }.padding(12)
-                    }
                 }
-                if session.chromeVisible {
-                    Divider()
-                    HStack(spacing: 16) {
-                        Button {
-                            session.perform(.previousPage)
-                        } label: {
-                            Image(systemName: "backward.end")
-                        }
-                        .help("Previous Page").disabled(session.position.page == 0)
-                        Slider(
-                            value: Binding(
-                                get: { Double(session.position.page) }, set: { session.seek(Int($0.rounded())) }),
-                            in: 0...Double(max(1, session.position.count - 1)), step: 1
+                .animation(.easeInOut(duration: 0.18), value: session.chromeVisible)
+        }
+    }
+
+    private var readerProgress: some View {
+        HStack(spacing: 16) {
+            Button {
+                session.perform(.previousPage)
+            } label: {
+                Image(systemName: "backward.end")
+            }.help("Previous Page").disabled(session.position.page == 0)
+            Slider(
+                value: Binding(
+                    get: { Double(session.position.page) },
+                    set: { session.seek(Int($0.rounded()), hideControls: false) }),
+                in: 0...Double(max(1, session.position.count - 1)), step: 1,
+                onEditingChanged: { editing in if !editing { session.chromeVisible = false } }
+            )
+            .disabled(session.position.count <= 1)
+            .accessibilityLabel("Page")
+            Text(session.pageLabel).monospacedDigit().font(.callout).frame(minWidth: 75)
+            Button {
+                session.perform(.nextPage)
+            } label: {
+                Image(systemName: "forward.end")
+            }.help("Next Page").disabled(session.position.page >= session.position.count - 1)
+        }.buttonStyle(.borderless)
+    }
+
+    private var readerToolbar: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Button {
+                    session.showPageList.toggle()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("Show / Hide Thumbnails")
+                Button {
+                    session.perform(.toggleOverview)
+                } label: {
+                    Image(systemName: "square.grid.3x3")
+                }
+                .help("Page Overview")
+                Button {
+                    session.perform(.readingSettings)
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .help("Reading Settings")
+                Button {
+                    showHelp.toggle()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help("Reader Controls")
+                .popover(isPresented: $showHelp) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Reader Controls").font(.headline)
+                        Text(
+                            "Click the sides to turn pages immediately; click the center to show controls. Right-click an image to preview it. Dragging does not move the page."
                         )
-                        .disabled(session.position.count <= 1)
-                        .accessibilityLabel("Page")
-                        Text(session.pageLabel).monospacedDigit().font(.callout).frame(minWidth: 75)
-                        Button {
-                            session.perform(.nextPage)
-                        } label: {
-                            Image(systemName: "forward.end")
+                        Text(
+                            "A / D: pages · Space: a screen · Q: controls · T: thumbnails · F: overview · R: reading settings"
+                        )
+                        .font(.callout)
+                        Button("Got It") {
+                            hintsSeen = true
+                            showHelp = false
                         }
-                        .help("Next Page").disabled(
-                            session.position.page >= session.position.count - 1)
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.horizontal, 20).padding(.vertical, 10)
-                    .background(.bar)
+                    }.padding(20).frame(width: 350)
                 }
+                Button {
+                    openWindow(id: "library")
+                } label: {
+                    Image(systemName: "books.vertical")
+                }
+                .help("Show Library")
+            }
+            HStack(spacing: 8) {
+                if let reference = session.book?.online {
+                    Button {
+                        openWindow(
+                            id: "manga",
+                            value: SourceMangaLink(
+                                sourceKey: reference.sourceKey, mangaKey: reference.mangaKey,
+                                title: reference.mangaTitle, cover: reference.cover))
+                    } label: {
+                        Image(systemName: "list.bullet")
+                    }.help("Chapters")
+                }
+                Picker(
+                    "Page Layout",
+                    selection: Binding(get: { session.position.layout }, set: { session.setLayout($0) })
+                ) {
+                    Text("Adaptive Pages").tag(PageLayout.adaptive)
+                    Text("Continuous").tag(PageLayout.continuous)
+                }.labelsHidden().frame(width: 130)
+                Menu {
+                    Picker("Reading Direction", selection: $session.direction) {
+                        Text("Right to Left").tag(ReadingDirection.rightToLeft)
+                        Text("Left to Right").tag(ReadingDirection.leftToRight)
+                    }
+                    Divider()
+                    ForEach([ReaderAction.fitPage, .fitWidth, .actualSize, .zoomIn, .zoomOut], id: \.self) {
+                        action in
+                        Button(action.title) { session.perform(action) }
+                    }
+                    Divider()
+                    Button("Hide Controls") { session.chromeVisible = false }
+                    Button("Full Screen") { session.perform(.toggleFullScreen) }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .help("Reader Options")
             }
         }
     }
 
-    @ToolbarContentBuilder private var readerToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
+    private var compactReaderToolbar: some View {
+        HStack(spacing: 10) {
             Button {
                 session.showPageList.toggle()
             } label: {
                 Image(systemName: "sidebar.left")
-            }
-            .help("Show / Hide Thumbnails")
+            }.help("Show / Hide Thumbnails")
             Button {
                 session.perform(.toggleOverview)
             } label: {
                 Image(systemName: "square.grid.3x3")
-            }
-            .help("Page Overview")
+            }.help("Page Overview")
             Button {
                 session.perform(.readingSettings)
             } label: {
                 Image(systemName: "slider.horizontal.3")
-            }
-            .help("Reading Settings")
-            Button {
-                showHelp.toggle()
-            } label: {
-                Image(systemName: "questionmark.circle")
-            }
-            .help("Reader Controls")
-            .popover(isPresented: $showHelp) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Reader Controls").font(.headline)
-                    Text(
-                        "Click the sides to turn pages; click the center to show controls. Double-click a page to preview its image. Dragging does not move the page."
-                    )
-                    Text(
-                        "A / D: pages · Space: a screen · Q: controls · T: thumbnails · F: overview · R: reading settings"
-                    )
-                    .font(.callout)
-                    Button("Got It") {
-                        hintsSeen = true
-                        showHelp = false
-                    }
-                }.padding(20).frame(width: 350)
-            }
-            Button {
-                openWindow(id: "library")
-            } label: {
-                Image(systemName: "books.vertical")
-            }
-            .help("Show Library")
-        }
-        ToolbarItemGroup {
-            if let reference = session.book?.online {
-                Button {
-                    openWindow(
-                        id: "manga",
-                        value: SourceMangaLink(
-                            sourceKey: reference.sourceKey, mangaKey: reference.mangaKey,
-                            title: reference.mangaTitle, cover: reference.cover))
-                } label: {
-                    Image(systemName: "list.bullet")
-                }.help("Chapters")
-            }
-            Picker(
-                "Page Layout",
-                selection: Binding(get: { session.position.layout }, set: { session.setLayout($0) })
-            ) {
-                Text("Adaptive Pages").tag(PageLayout.adaptive)
-                Text("Continuous").tag(PageLayout.continuous)
-            }.frame(width: 130)
+            }.help("Reading Settings")
             Menu {
+                Picker(
+                    "Page Layout",
+                    selection: Binding(
+                        get: { session.position.layout }, set: { session.setLayout($0) })
+                ) {
+                    Text("Adaptive Pages").tag(PageLayout.adaptive)
+                    Text("Continuous").tag(PageLayout.continuous)
+                }
                 Picker("Reading Direction", selection: $session.direction) {
                     Text("Right to Left").tag(ReadingDirection.rightToLeft)
                     Text("Left to Right").tag(ReadingDirection.leftToRight)
                 }
-                Divider()
-                ForEach([ReaderAction.fitPage, .fitWidth, .actualSize, .zoomIn, .zoomOut], id: \.self) {
-                    action in
+                ForEach([ReaderAction.fitPage, .fitWidth, .actualSize, .zoomIn, .zoomOut], id: \.self) { action in
                     Button(action.title) { session.perform(action) }
                 }
-                Divider()
-                Button("Hide Controls") { session.chromeVisible = false }
+                Button("Show Library") { openWindow(id: "library") }
                 Button("Full Screen") { session.perform(.toggleFullScreen) }
             } label: {
                 Image(systemName: "ellipsis.circle")
-            }
-            .help("Reader Options")
+            }.help("Reader Options")
         }
     }
 
@@ -302,7 +350,7 @@ struct ReaderWindowView: View {
         } label: {
             Image(systemName: left ? "chevron.left" : "chevron.right")
                 .font(.title3).frame(width: 36, height: 44)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .modifier(ReaderGlassSurface())
         }
         .buttonStyle(.plain)
         .help(next ? "Next Page" : "Previous Page")
@@ -443,18 +491,27 @@ struct ReaderOptionsPanel: View {
 }
 
 struct ReaderInputSettings: View {
+    @AppStorage("reader.preloadPages") private var preloadPages = 2
     @AppStorage("reader.clickToTurn") private var clickToTurn = true
     @AppStorage("reader.swapClickSides") private var swapClickSides = false
     @AppStorage("reader.reverseWheelPaging") private var reverseWheel = false
     @AppStorage("reader.directionalArrows") private var directionalArrows = false
     var body: some View {
         Section("Mouse and Keyboard") {
+            Stepper(value: $preloadPages, in: 0...20) {
+                HStack {
+                    Text("Extra Preloaded Pages")
+                    Spacer()
+                    Text(preloadPages, format: .number).monospacedDigit()
+                }
+            }
+            .help("Preload this many neighbouring pages in each direction. Zero loads only the visible pages.")
             Toggle("Click Side Areas to Turn Pages", isOn: $clickToTurn)
             Toggle("Swap Click Sides", isOn: $swapClickSides).disabled(!clickToTurn)
             Toggle("Reverse Wheel Paging", isOn: $reverseWheel)
             Toggle("Left / Right Arrows Follow Reading Direction", isOn: $directionalArrows)
             Text(
-                "The center area toggles controls. Double-click an image to preview it. Scroll a zoomed page to its edge, then start a new gesture to turn the page."
+                "The center area toggles controls. Right-click an image to preview it. Scroll a zoomed page to its edge, then start a new gesture to turn the page."
             )
             .font(.caption).foregroundStyle(.secondary)
         }
@@ -519,5 +576,15 @@ private struct ReaderImagePreview: View {
                     image = decoded
                 } catch is CancellationError {} catch { self.error = error.localizedDescription }
             }
+    }
+}
+
+private struct ReaderGlassSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 18))
+        } else {
+            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        }
     }
 }

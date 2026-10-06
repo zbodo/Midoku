@@ -2744,6 +2744,46 @@
           }
         }
       }
+    },
+    "Click the sides to turn pages immediately; click the center to show controls. Right-click an image to preview it. Dragging does not move the page.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击两侧立即翻页，点击中央显示操作栏。右键点击图片可打开预览，拖动不会移动页面。"
+          }
+        }
+      }
+    },
+    "The center area toggles controls. Right-click an image to preview it. Scroll a zoomed page to its edge, then start a new gesture to turn the page.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击中央切换操作栏，右键点击图片打开预览。放大页面滚动到边缘后，重新开始一次滚动手势即可翻页。"
+          }
+        }
+      }
+    },
+    "Extra Preloaded Pages": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额外预加载页数"
+          }
+        }
+      }
+    },
+    "Preload this many neighbouring pages in each direction. Zero loads only the visible pages.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在前后两个方向分别预加载指定数量的相邻页面。设为 0 时仅加载当前可见页面。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

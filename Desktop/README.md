@@ -100,14 +100,25 @@ and cached images.
   (width > height) occupy two page slots, but remain one unsplit image and one
   navigation/progress entry. If two slots do not fit, the entire image is fitted
   into the available viewport as the sole page.
+- Adaptive page turns animate overlapping pages into their new positions, with
+  incoming/outgoing pages sliding in/out. Neighbour pages are prefetched into a
+  bounded decoded-image cache. Reading Settings configures extra preloaded
+  pages per direction (default 2, range 0–20), including continuous reading.
+  Turns commit immediately, including cache misses;
+  unloaded pages show a live native spinner rather than a loading sentence.
+  Loaded images replace the spinner, and failures remain retryable.
+  Reduce Motion skips the sliding animation.
+- Top controls and progress float over the unchanged viewport, using native
+  Liquid Glass on macOS 26+ and material on earlier macOS. Turns hide controls
+  automatically; the center area or Q restores them.
 - Adaptive paging and continuous reading use
   the same AppKit scrolling viewport. Click the outer 37.5% areas to turn pages;
   the center toggles controls. Sides follow reading direction. Continuous mode
   clicks only toggle controls. Dragging cancels a click and never pans the page.
-- Double-click the actual image to open a separate image-preview sheet; its
+- Right-click the image and choose Preview Image to open a separate sheet; its
   zoom controls do not alter the reading position. Right-click offers preview,
   navigation and fit actions. Failed pages can be clicked to retry.
-- The wheel turns fitted pages. On tall/zoomed pages it scrolls within the page;
+- Each discrete mouse-wheel event turns a fitted page immediately. On tall/zoomed pages it scrolls within the page;
   reaching an edge needs a new gesture to turn. Trackpad momentum cannot turn
   additional pages. Continuous mode always scrolls. Command-wheel and pinch
   zoom the main viewport; optional reverse wheel paging only affects fitted pages.
@@ -186,7 +197,7 @@ complete sign-in and retry, restart with a partial and a fully cached chapter,
 then uninstall/reinstall the source. The previous baseline was reported to
 compile and launch on the user's Mac; this reader refactor still requires a
 macOS build and interactive checks. Verify simultaneous readers, RTL/LTR click
-zones, drag cancellation, double-click without a stray turn, tall-page boundary
+zones, drag cancellation, immediate clicks without double-click actions, tall-page boundary
 scrolling, trackpad inertia, adaptive one/two/multi-page resizing, one-page turns
 near the chapter end, continuous position restoration, shortcut migration,
 text-field focus, resizing and VoiceOver. Website network access requires the chosen

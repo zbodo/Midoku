@@ -178,8 +178,10 @@ final class ImporterTests: XCTestCase {
         XCTAssertTrue(second.chromeVisible)
         XCTAssertTrue(first.handleKey(.init(key: "q"), shortcuts: shortcuts, repeatEvent: true))
         XCTAssertFalse(first.chromeVisible)
+        first.chromeVisible = true
         XCTAssertTrue(first.handleKey(.init(key: "d"), shortcuts: shortcuts, repeatEvent: false))
         XCTAssertEqual(first.position.page, 1)
+        XCTAssertFalse(first.chromeVisible)
         XCTAssertEqual(first.position.visiblePages, [1, 2])
         XCTAssertFalse(try XCTUnwrap(library.book(book.id)).isRead)
         XCTAssertEqual(second.position.page, 0)
