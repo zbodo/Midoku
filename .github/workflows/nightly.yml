@@ -10,8 +10,12 @@ jobs:
       - name: Build
         run: |
           xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Release \
-            -destination 'platform=macOS' -derivedDataPath build/Desktop \
+            -destination 'generic/platform=macOS' -derivedDataPath build/Desktop \
             -skipPackagePluginValidation -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
+      - name: Verify Apple Silicon and Intel architectures
+        run: |
+          lipo -verify_arch arm64 x86_64 \
+            build/Desktop/Build/Products/Release/Midoku.app/Contents/MacOS/Midoku
       - name: Package app
         run: |
           ditto -c -k --sequesterRsrc --keepParent \

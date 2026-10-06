@@ -5,6 +5,18 @@ library, source browser, manga details, website and reader windows. Open
 **Midoku.xcodeproj**, select **Midoku**, and run on **My Mac** in **Xcode 16+**.
 Select a development team to run a signed sandboxed build.
 
+Debug builds use `ONLY_ACTIVE_ARCH = YES`, so the app and Swift Package
+dependencies build for the selected Mac's architecture. Release builds use
+`ONLY_ACTIVE_ARCH = NO`; the nightly workflow builds for the generic macOS
+destination and checks that the app contains both arm64 and x86_64.
+
+If Xcode reports `Unable to resolve module dependency` together with
+`built for incompatible target`, inspect the target triples in the build log.
+An x86_64 app compile cannot import arm64-only package modules. Pull the latest
+project configuration, select **My Mac**, then use **Product → Clean Build
+Folder** before rebuilding. Package resolution succeeding does not verify
+that the app and its dependencies were built for matching architectures.
+
 ## Read from Aidoku sources
 
 1. Choose **File → Sources**, then **Manage Sources**.

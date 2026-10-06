@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Build and test native app
         run: |
-          xcodebuild -project Midoku.xcodeproj -scheme Midoku \
+          xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
             -destination 'platform=macOS' -derivedDataPath build/Desktop \
             -skipPackagePluginValidation -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO test
