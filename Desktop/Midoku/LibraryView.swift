@@ -17,6 +17,7 @@ struct LibraryView: View {
     @State private var selection: Set<UUID> = []
     @State private var sort: String = "title"
     @State private var showInspector = true
+    @State private var showingSources = false
     @State private var collectionName = ""
     @State private var creatingCollection = false
     @State private var removingBooks = false
@@ -59,6 +60,9 @@ struct LibraryView: View {
 
     var body: some View {
         interactiveShelf
+            .sheet(isPresented: $showingSources) {
+                sourceSheet
+            }
             .sheet(item: $library.pendingAidokuBackup) { preview in
                 AidokuBackupImportView(preview: preview).environmentObject(library).environmentObject(sources)
             }
@@ -89,6 +93,23 @@ struct LibraryView: View {
             set: { if !$0 { library.errorMessage = nil } })
     }
 
+    private var sourceSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sources").font(.headline)
+                Spacer()
+                Button("Done") { showingSources = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding()
+            Divider()
+            NativeSourceHub()
+                .environmentObject(sources)
+                .environmentObject(library)
+        }
+        .frame(minWidth: 720, idealWidth: 1000, minHeight: 500, idealHeight: 700)
+    }
+
     private var layout: some View {
         NavigationSplitView {
             sidebar
@@ -114,7 +135,7 @@ struct LibraryView: View {
     @ToolbarContentBuilder private var shelfToolbar: some ToolbarContent {
         ToolbarItem {
             Button {
-                openWindow(id: "sources")
+                showingSources = true
             } label: {
                 Label("Sources", systemImage: "globe")
             }
