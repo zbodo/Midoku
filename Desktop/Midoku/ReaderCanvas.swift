@@ -440,7 +440,7 @@ final class ComicScrollView: NSScrollView {
         }
         overlay.animate(to: incoming, direction: transitionDirection)
         transitionTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .milliseconds(260)) } catch { return }
+            do { try await Task.sleep(for: .milliseconds(440)) } catch { return }
             self?.clearTransition()
         }
     }
@@ -662,54 +662,81 @@ private final class ComicTransitionView: NSView {
         }
     }
     func animate(to incoming: [ComicTransitionPage], direction: CGFloat) {
-        for page in incoming where page.image == nil {
-            let indicator = NSProgressIndicator()
-            indicator.style = .spinning
-            indicator.isIndeterminate = true
-            let area = page.rect.intersection(bounds)
-            guard !area.isEmpty else { continue }
-            indicator.frame = NSRect(x: area.midX - 16, y: area.midY - 16, width: 32, height: 32)
-            addSubview(indicator)
-            indicator.startAnimation(nil)
+        let slides = ReaderSlideGeometry.slides(
+            current: pages.map { ReaderPageFrame(page: $0.page, rect: $0.rect) },
+            target: incoming.map { ReaderPageFrame(page: $0.page, rect: $0.rect) },
+            viewport: bounds, direction: Double(direction))
+        var assets = Dictionary(uniqueKeysWithValues: pages.map { ($0.page, $0) })
+        for page in incoming { assets[page.page] = page }
+        for slide in slides {
+            guard let asset = assets[slide.page] else { continue }
+            let cell: CALayer
+            if let existing = imageLayers[slide.page] {
+                cell = existing
+                cell.contents = asset.image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            } else {
+                cell = CALayer()
+                cell.contents = asset.image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                cell.contentsGravity = .resizeAspect
+                layer?.addSublayer(cell)
+                imageLayers[slide.page] = cell
+            }
+            // Loading placeholders travel with their page cells as well.
+            if asset.image == nil {
+                let spinner = CAShapeLayer()
+                let path = CGMutablePath()
+                path.addArc(
+                    center: CGPoint(x: 16, y: 16), radius: 12,
+                    startAngle: 0, endAngle: .pi * 1.5, clockwise: false)
+                spinner.path = path
+                spinner.fillColor = nil
+                spinner.strokeColor = NSColor.secondaryLabelColor.cgColor
+                spinner.lineWidth = 2.5
+                spinner.lineCap = .round
+                spinner.frame = NSRect(
+                    x: slide.end.width / 2 - 16,
+                    y: slide.end.height / 2 - 16, width: 32, height: 32)
+                cell.addSublayer(spinner)
+                let rotation = CABasicAnimation(keyPath: "transform.rotation")
+                rotation.fromValue = 0
+                rotation.toValue = Double.pi * 2
+                rotation.duration = 0.8
+                rotation.repeatCount = .infinity
+                spinner.add(rotation, forKey: "loading")
+            }
+            move(cell, from: slide.start, to: slide.end)
         }
-        let distance = pages.first.map { $0.rect.width + CGFloat(AdaptivePageLayout.gap) } ?? bounds.width
-        let destinations = Dictionary(uniqueKeysWithValues: incoming.map { ($0.page, $0) })
-        for old in pages {
-            guard let imageLayer = imageLayers[old.page] else { continue }
-            let end = destinations[old.page]?.rect ?? old.rect.offsetBy(dx: direction * distance, dy: 0)
-            move(imageLayer, from: old.rect, to: end, disappearing: destinations[old.page] == nil)
+        // Keep exiting cells until they have actually crossed the edge. Their
+        // presentation frames are also needed if another turn interrupts us.
+        pages = slides.compactMap { slide in
+            guard let asset = assets[slide.page] else { return nil }
+            return ComicTransitionPage(page: slide.page, image: asset.image, rect: slide.end)
         }
-        for page in incoming where imageLayers[page.page] == nil {
-            let imageLayer = CALayer()
-            imageLayer.contents = page.image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
-            imageLayer.contentsGravity = .resizeAspect
-            layer?.addSublayer(imageLayer)
-            imageLayers[page.page] = imageLayer
-            move(
-                imageLayer, from: page.rect.offsetBy(dx: -direction * distance, dy: 0),
-                to: page.rect, disappearing: false)
-        }
-        pages = incoming
     }
-    private func move(_ imageLayer: CALayer, from start: NSRect, to end: NSRect, disappearing: Bool) {
+    private func move(_ imageLayer: CALayer, from start: NSRect, to end: NSRect) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         imageLayer.frame = end
-        imageLayer.opacity = disappearing ? 0 : 1
+        imageLayer.opacity = 1
         CATransaction.commit()
-        let position = CABasicAnimation(keyPath: "position")
+        let position = spring("position")
         position.fromValue = NSValue(point: NSPoint(x: start.midX, y: start.midY))
         position.toValue = NSValue(point: NSPoint(x: end.midX, y: end.midY))
-        let size = CABasicAnimation(keyPath: "bounds.size")
+        let size = spring("bounds.size")
         size.fromValue = NSValue(size: start.size)
         size.toValue = NSValue(size: end.size)
-        let opacity = CABasicAnimation(keyPath: "opacity")
-        opacity.fromValue = 1
-        opacity.toValue = disappearing ? 0 : 1
         let group = CAAnimationGroup()
-        group.animations = [position, size, opacity]
-        group.duration = 0.25
-        group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        group.animations = [position, size]
+        group.duration = 0.42
         imageLayer.add(group, forKey: "pageTurn")
+    }
+    private func spring(_ keyPath: String) -> CASpringAnimation {
+        let animation = CASpringAnimation(keyPath: keyPath)
+        animation.mass = 1
+        animation.stiffness = 320
+        animation.damping = 36
+        animation.initialVelocity = 0
+        animation.duration = 0.42
+        return animation
     }
 }

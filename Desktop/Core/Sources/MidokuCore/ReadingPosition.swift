@@ -149,3 +149,51 @@ public enum ReaderPrefetchPolicy {
         return Array(max(0, current - extra)..<min(count, current + visible + extra))
     }
 }
+
+public struct ReaderPageFrame: Equatable, Sendable {
+    public let page: Int
+    public let rect: CGRect
+    public init(page: Int, rect: CGRect) {
+        self.page = page
+        self.rect = rect
+    }
+}
+
+public struct ReaderPageSlide: Equatable, Sendable {
+    public let page: Int
+    public let start: CGRect
+    public let end: CGRect
+}
+
+public enum ReaderSlideGeometry {
+    public static func slides(
+        current: [ReaderPageFrame], target: [ReaderPageFrame], viewport: CGRect, direction: Double
+    ) -> [ReaderPageSlide] {
+        let old = Dictionary(uniqueKeysWithValues: current.map { ($0.page, $0.rect) })
+        let new = Dictionary(uniqueKeysWithValues: target.map { ($0.page, $0.rect) })
+        let sign: CGFloat = direction > 0 ? 1 : -1
+        let shared = current.compactMap { page -> CGFloat? in
+            guard let destination = new[page.page] else { return nil }
+            return abs(destination.midX - page.rect.midX)
+        }
+        let distance = max(1, shared.max() ?? viewport.width)
+        var result: [ReaderPageSlide] = []
+        for page in current {
+            if let end = new[page.page] {
+                result.append(ReaderPageSlide(page: page.page, start: page.rect, end: end))
+            } else {
+                // Exit fully through the clipping edge, even when row capacity
+                // or wide-image dimensions changed at this turn.
+                let needed = sign > 0 ? viewport.maxX - page.rect.minX : page.rect.maxX - viewport.minX
+                let end = page.rect.offsetBy(dx: sign * max(distance, needed + 12), dy: 0)
+                result.append(ReaderPageSlide(page: page.page, start: page.rect, end: end))
+            }
+        }
+        for page in target where old[page.page] == nil {
+            let needed = sign > 0 ? page.rect.maxX - viewport.minX : viewport.maxX - page.rect.minX
+            let start = page.rect.offsetBy(dx: -sign * max(distance, needed + 12), dy: 0)
+            result.append(ReaderPageSlide(page: page.page, start: start, end: page.rect))
+        }
+        return result
+    }
+}

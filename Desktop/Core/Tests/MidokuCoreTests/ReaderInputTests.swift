@@ -101,4 +101,51 @@ final class ReaderInputTests: XCTestCase {
         XCTAssertEqual(ReaderPrefetchPolicy.pages(count: 20, page: 5, visibleCount: 3, extraPages: -1), [5, 6, 7])
     }
 
+    func testSlidingRowRetainsPagesAndCrossesViewportEdges() throws {
+        let viewport = CGRect(x: 0, y: 0, width: 1200, height: 800)
+        let current = (0..<3).map {
+            ReaderPageFrame(page: $0, rect: CGRect(x: $0 * 400, y: 0, width: 380, height: 800))
+        }
+        let target = (1..<4).map {
+            ReaderPageFrame(page: $0, rect: CGRect(x: ($0 - 1) * 400, y: 0, width: 380, height: 800))
+        }
+        let slides = ReaderSlideGeometry.slides(current: current, target: target, viewport: viewport, direction: -1)
+        let kept = try XCTUnwrap(slides.first { $0.page == 1 })
+        XCTAssertEqual(kept.start, current[1].rect)
+        XCTAssertEqual(kept.end, target[0].rect)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(slides.first { $0.page == 0 }).end.maxX, viewport.minX)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(slides.first { $0.page == 3 }).start.minX, viewport.maxX)
+    }
+
+    func testSlidingGeometryMirrorsDirectionAndHandlesWidePages() throws {
+        let viewport = CGRect(x: 0, y: 0, width: 900, height: 800)
+        let old = [ReaderPageFrame(page: 0, rect: CGRect(x: 0, y: 0, width: 900, height: 600))]
+        let new = [ReaderPageFrame(page: 1, rect: CGRect(x: 200, y: 0, width: 500, height: 800))]
+        for direction in [-1.0, 1.0] {
+            let slides = ReaderSlideGeometry.slides(current: old, target: new, viewport: viewport, direction: direction)
+            let leaving = try XCTUnwrap(slides.first { $0.page == 0 })
+            let entering = try XCTUnwrap(slides.first { $0.page == 1 })
+            XCTAssertEqual(leaving.start, old[0].rect)
+            XCTAssertEqual(entering.end, new[0].rect)
+            if direction > 0 {
+                XCTAssertGreaterThanOrEqual(leaving.end.minX, viewport.maxX)
+                XCTAssertLessThanOrEqual(entering.start.maxX, viewport.minX)
+            } else {
+                XCTAssertLessThanOrEqual(leaving.end.maxX, viewport.minX)
+                XCTAssertGreaterThanOrEqual(entering.start.minX, viewport.maxX)
+            }
+        }
+    }
+
+    func testInterruptedSlideStartsAtCapturedPresentationFrame() throws {
+        let visible = CGRect(x: 127, y: 15, width: 420, height: 760)
+        let target = CGRect(x: 10, y: 15, width: 420, height: 760)
+        let slides = ReaderSlideGeometry.slides(
+            current: [ReaderPageFrame(page: 2, rect: visible)],
+            target: [ReaderPageFrame(page: 2, rect: target)],
+            viewport: CGRect(x: 0, y: 0, width: 900, height: 800), direction: -1)
+        XCTAssertEqual(try XCTUnwrap(slides.first).start, visible)
+        XCTAssertEqual(try XCTUnwrap(slides.first).end, target)
+    }
+
 }

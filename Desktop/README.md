@@ -101,7 +101,10 @@ and cached images.
   navigation/progress entry. If two slots do not fit, the entire image is fitted
   into the available viewport as the sole page.
 - Adaptive page turns animate overlapping pages into their new positions, with
-  incoming/outgoing pages sliding in/out. Neighbour pages are prefetched into a
+  incoming/outgoing pages fully crossing the clipped viewport edges. All cells
+  use the same damped spring to settle into place without an exit fade. Rapid
+  turns resume from presentation-layer positions, retaining exiting cells until
+  they leave the viewport. Neighbour pages are prefetched into a
   bounded decoded-image cache. Reading Settings configures extra preloaded
   pages per direction (default 2, range 0–20), including continuous reading.
   Turns commit immediately, including cache misses;
