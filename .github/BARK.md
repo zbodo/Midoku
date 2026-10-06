@@ -1,4 +1,4 @@
-# Actions 成功通知
+# Nightly 构建成功通知
 
 在仓库 **Settings → Secrets and variables → Actions** 中分别配置：
 
@@ -11,13 +11,8 @@
 服务地址不要包含密钥、查询参数或片段；支持自建 HTTPS Bark 服务及其路径前缀。
 
 `nightly.yml` 内的 `notify` job 通过 `needs: build` 等待构建成功后通知手机，
-直接使用运行分支上的配置，适用于 `work`，无需合入默认分支。
+直接使用运行分支上的配置。
 
-`bark.yml` 额外监听 macOS Desktop、SwiftLint 和
-Legacy AltStore Source (manual only)，不再监听 nightly 构建，避免重复通知。
-通知包含工作流名称、
-分支和运行编号，点击可打开对应 Actions 运行；使用 `group=example` 和 `ttl=600`。
-失败或取消的运行不通知，未配置地址或密钥时跳过，通知失败不改变原工作流结果。
-
-仅独立的 `bark.yml` 必须合入仓库默认分支后，GitHub 才会触发 `workflow_run` 通知。
-通知任务不下载或执行被监控工作流的代码或产物。
+通知包含工作流名称、分支和运行编号，点击可打开对应 Actions 运行；
+使用 `group=example` 和 `ttl=600`。
+失败或取消的构建不通知，未配置地址或密钥时跳过，通知失败不改变构建结果。
