@@ -1,6 +1,6 @@
-# Aidoku
+# Midoku
 
-A free and open source manga reading application for iOS, iPadOS, and macOS.
+A free and open source manga reading application for iOS, iPadOS, and macOS, based on [Aidoku](https://github.com/Aidoku/Aidoku). Midoku retains Aidoku’s interface and services, with separate library and reader windows on Mac Catalyst.
 
 <p>
 	<img src="https://raw.githubusercontent.com/Aidoku/Website/refs/heads/main/static/images/library-noframe.png" width="25%" alt="Library">
@@ -18,30 +18,35 @@ A free and open source manga reading application for iOS, iPadOS, and macOS.
 - Tracker integration (AniList, MyAnimeList, etc.)
 - OCR dictionary lookup
 
-## Installation
+## Mac Catalyst
 
-For detailed installation instructions, check out [the website](https://aidoku.app).
+The original Aidoku interface is also available as a Mac Catalyst target with a main library window and a separate reusable reader window. Requires macOS 15+. See [Mac build, controls and validation](docs/Mac-Catalyst.md).
 
-### TestFlight
+## Building Midoku
 
-To join the TestFlight, you will need to join the [Aidoku Discord](https://discord.gg/kh2PYT8V8d).
+Open `Midoku.xcodeproj`, select the **Midoku** scheme, and choose an iOS device/simulator or **My Mac (Mac Catalyst)**. Mac Catalyst requires macOS 15 or later. Configure your development team for a signed build.
 
-### AltStore
+For an unsigned Mac build:
 
-We have an AltStore repo that contains the latest releases ipa. You can copy the [direct source URL](https://raw.githubusercontent.com/Aidoku/Aidoku/altstore/apps.json) and paste it into AltStore. Note that AltStore PAL is not supported.
+```sh
+xcodebuild -project Midoku.xcodeproj -scheme Midoku -configuration Debug \
+  -destination 'platform=macOS,variant=Mac Catalyst' \
+  -derivedDataPath build/Midoku -clonedSourcePackagesDirPath build/SourcePackages \
+  -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO build
+```
 
-### Manual Installation
+The product is `build/Midoku/Build/Products/Debug-maccatalyst/Midoku.app`, with the default application identifier `app.midoku.Midoku`. See [desktop controls and compatibility](docs/Mac-Catalyst.md).
 
-The latest ipa file will always be available from the [releases page](https://github.com/Aidoku/Aidoku/releases). Nightly ipas are also built on each commit, but it's not recommended to use these since they may have in-progress changes that could cause issues when updating later.
+Midoku’s project and release automation belong to [zbodo/Midoku](https://github.com/zbodo/Midoku). Aidoku’s TestFlight, website and upstream releases distribute Aidoku; they are separate from Midoku.
 
-## Contributing
+## Upstream and licensing
 
-Aidoku is still in a beta phase, and there are a lot of planned features and fixes. If you're interested in contributing, I'd first recommend checking with me on [Discord](https://discord.gg/kh2PYT8V8d) in the app development channel.
+Aidoku was created by Skitty and its contributors. Upstream authorship, license notices and file headers are retained. AidokuRunner and the community source ecosystem retain their original names and protocols for compatibility.
 
-This repo (excluding translations) is licensed under [GPLv3](https://github.com/Aidoku/Aidoku/blob/main/LICENSE), but contributors must also sign the project [CLA](https://gist.github.com/Skittyblock/893952ff23f0df0e5cd02abbaddc2be9). Essentially, this just gives me (Skittyblock) the ability to distribute Aidoku via TestFlight/the App Store, but others must obtain an exception from me in order to do the same. Otherwise, GPLv3 applies and this code can be used freely as long as the modified source code is made available.
+The app code is licensed under [GPLv3](LICENSE), excluding translations. Translations are licensed separately under [Apache 2.0](https://spdx.org/licenses/Apache-2.0.html).
+
+Aidoku’s upstream contribution and distribution terms are documented in its [README](https://github.com/Aidoku/Aidoku#contributing) and [CLA](https://gist.github.com/Skittyblock/893952ff23f0df0e5cd02abbaddc2be9). Renaming this fork does not change the upstream licenses or grant an upstream distribution exception.
 
 ### Translations
 
-Interested in translating Aidoku? We use [Weblate](https://hosted.weblate.org/engage/aidoku/) to crowdsource translations, so anyone can create an account and contribute!
-
-Translations are licensed separately from the app code, under [Apache 2.0](https://spdx.org/licenses/Apache-2.0.html).
+Aidoku’s upstream translations are maintained on [Weblate](https://hosted.weblate.org/engage/aidoku/). Midoku retains those translations and their attribution.

@@ -19,15 +19,15 @@ jobs:
         id: commitinfo
         run: echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
       - name: Build
-        run: xcodebuild -scheme "Aidoku" -configuration Release archive -archivePath build/Aidoku.xcarchive -skipPackagePluginValidation CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild -scheme "Midoku" -configuration Release archive -archivePath build/Midoku.xcarchive -skipPackagePluginValidation CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
       - name: Package ipa
         run: |
           mkdir Payload
-          cp -r build/Aidoku.xcarchive/Products/Applications/Aidoku.app Payload
-          zip -r Aidoku-iOS_nightly-${{ steps.commitinfo.outputs.sha_short }}.ipa Payload
+          cp -r build/Midoku.xcarchive/Products/Applications/Midoku.app Payload
+          zip -r Midoku-iOS_nightly-${{ steps.commitinfo.outputs.sha_short }}.ipa Payload
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Aidoku-iOS_nightly-${{ steps.commitinfo.outputs.sha_short }}.ipa
-          path: Aidoku-iOS_nightly-${{ steps.commitinfo.outputs.sha_short }}.ipa
+          name: Midoku-iOS_nightly-${{ steps.commitinfo.outputs.sha_short }}.ipa
+          path: Midoku-iOS_nightly-${{ steps.commitinfo.outputs.sha_short }}.ipa
           if-no-files-found: error

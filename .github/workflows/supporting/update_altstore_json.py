@@ -6,10 +6,10 @@ import plistlib
 import io
 from datetime import datetime
 
-bundle_id = "app.aidoku.Aidoku"
+bundle_id = "app.midoku.Midoku"
 minimum_ios_version = "15.0"
 json_file_name = ".github/workflows/supporting/altstore/apps.json"
-github_repo = "Aidoku/Aidoku"
+github_repo = "zbodo/Midoku"
 
 def fetch_latest_release(repo):
     api_url = f"https://api.github.com/repos/{repo}/releases"
@@ -129,7 +129,7 @@ def update_json_file(json_file, repo):
         version_date = date_obj.strftime("%Y-%m-%d")
 
         description = latest_release["body"]
-        keypharse = "Aidoku Release Information"
+        keypharse = "Midoku Release Information"
         if keypharse in description:
             description = description.split(keypharse, 1)[1].strip()
 
@@ -167,7 +167,7 @@ def update_json_file(json_file, repo):
 #        date_string = date_obj.strftime("%Y/%m/%d")
 #        news_entry = {
 #            "appID": bundle_id,
-#            "caption": f"New version of Aidoku just got released!",
+#            "caption": f"New version of Midoku just got released!",
 #            "date": latest_release["published_at"],
 #            "identifier": news_identifier,
 #            "notify": True,
