@@ -12,6 +12,13 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@v5
+      - name: Prepare artifact filename
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit_hash=$(git rev-parse --short=8 HEAD)
+          echo "filename=Midoku-macOS-$commit_hash.dmg" >> "$GITHUB_OUTPUT"
       - name: Show build environment
         run: |
           sw_vers
@@ -105,6 +112,7 @@ jobs:
       - name: Create and sign DMG
         env:
           SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          DMG_FILENAME: ${{ steps.artifact.outputs.filename }}
         run: |
           set -euo pipefail
           staging_path=$(mktemp -d "$RUNNER_TEMP/midoku-dmg.XXXXXX")
@@ -112,15 +120,16 @@ jobs:
           ditto build/Desktop/Build/Products/Release/Midoku.app "$staging_path/Midoku.app"
           ln -s /Applications "$staging_path/Applications"
           hdiutil create -volname Midoku -srcfolder "$staging_path" \
-            -fs HFS+ -format UDZO -ov Midoku-macOS.dmg
+            -fs HFS+ -format UDZO -ov "$DMG_FILENAME"
           codesign --sign "$SIGNING_IDENTITY" --keychain "$SIGNING_KEYCHAIN" \
-            --timestamp Midoku-macOS.dmg
-          codesign --verify --strict --verbose=2 Midoku-macOS.dmg
-          hdiutil verify Midoku-macOS.dmg
+            --timestamp "$DMG_FILENAME"
+          codesign --verify --strict --verbose=2 "$DMG_FILENAME"
+          hdiutil verify "$DMG_FILENAME"
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          path: Midoku-macOS.dmg
+          name: ${{ steps.artifact.outputs.filename }}
+          path: ${{ steps.artifact.outputs.filename }}
           archive: false
           if-no-files-found: error
       - name: Remove signing keychain

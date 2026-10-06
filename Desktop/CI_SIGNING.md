@@ -4,7 +4,8 @@
 **Developer ID Application** certificate. The test workflow remains unsigned.
 The signing workflow runs on pushes and manual dispatch, never on pull requests.
 Missing or invalid signing secrets fail the build instead of uploading an
-unsigned app. The output artifact is `Midoku-macOS.dmg`, uploaded directly with
+unsigned app. The output artifact is `Midoku-macOS-<commit-hash>.dmg`, using the
+checked-out build commit's short hash (at least 8 characters), uploaded directly with
 `actions/upload-artifact@v7` and `archive: false`. No ZIP wrapper or inner ZIP is
 created. The compressed, read-only DMG contains `Midoku.app` and an
 `Applications` shortcut for drag-and-drop installation. Both the app and DMG
@@ -41,7 +42,7 @@ New repository secret**, and add:
 
 After the workflow change is pushed, open **Actions → Build native macOS app →
 Run workflow**, select the branch containing the change, and run it. Download
-`Midoku-macOS.dmg` once the run passes. Open the DMG and drag `Midoku.app` to
+`Midoku-macOS-<commit-hash>.dmg` once the run passes. Open the DMG and drag `Midoku.app` to
 `Applications`. Pushes also trigger signed builds;
 branches containing this workflow require these secrets.
 
