@@ -1244,7 +1244,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在载入页面…"
+            "value": "正在加载页面…"
           }
         }
       }
@@ -2365,6 +2365,276 @@
           "stringUnit": {
             "state": "translated",
             "value": "退出登录"
+          }
+        }
+      }
+    },
+    "Scroll Forward a Screen": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "向后滚动一屏"
+          }
+        }
+      }
+    },
+    "Scroll Back a Screen": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "向前滚动一屏"
+          }
+        }
+      }
+    },
+    "Increase Page Width": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "增加页面宽度"
+          }
+        }
+      }
+    },
+    "Decrease Page Width": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "减小页面宽度"
+          }
+        }
+      }
+    },
+    "Show / Hide Thumbnails": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示／隐藏缩略图"
+          }
+        }
+      }
+    },
+    "Page Overview": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "页面总览"
+          }
+        }
+      }
+    },
+    "Reading Settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阅读设置"
+          }
+        }
+      }
+    },
+    "Reader Controls": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阅读操作"
+          }
+        }
+      }
+    },
+    "Got It": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "知道了"
+          }
+        }
+      }
+    },
+    "Mouse and Keyboard": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鼠标与键盘"
+          }
+        }
+      }
+    },
+    "Click Side Areas to Turn Pages": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击两侧区域翻页"
+          }
+        }
+      }
+    },
+    "Swap Click Sides": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "交换左右点击区域"
+          }
+        }
+      }
+    },
+    "Reverse Wheel Paging": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "反转滚轮翻页方向"
+          }
+        }
+      }
+    },
+    "Left / Right Arrows Follow Reading Direction": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "左右方向键遵循阅读方向"
+          }
+        }
+      }
+    },
+    "Preview Image": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预览图片"
+          }
+        }
+      }
+    },
+    "Page could not be decoded. Click to retry.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法解码页面，点击重试。"
+          }
+        }
+      }
+    },
+    "Add Shortcut…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加快捷键…"
+          }
+        }
+      }
+    },
+    "Unbind": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消绑定"
+          }
+        }
+      }
+    },
+    "Unbound": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未绑定"
+          }
+        }
+      }
+    },
+    "Remove Shortcut": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除快捷键"
+          }
+        }
+      }
+    },
+    "Click the sides to turn pages; click the center to show controls. Double-click a page to preview its image. Dragging does not move the page.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击两侧翻页，点击中央显示操作栏。双击页面可预览图片，拖动不会移动页面。"
+          }
+        }
+      }
+    },
+    "A / D: pages · Space: a screen · Q: controls · T: thumbnails · F: overview · R: reading settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A／D：翻页 · 空格：滚动一屏 · Q：操作栏 · T：缩略图 · F：总览 · R：阅读设置"
+          }
+        }
+      }
+    },
+    "A / D and arrow keys navigate pages. Space scrolls a screen in continuous mode. Q shows controls, T opens thumbnails, F opens the page overview.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A／D 和方向键用于翻页，连续模式下空格滚动一屏。Q 显示操作栏，T 打开缩略图，F 打开页面总览。"
+          }
+        }
+      }
+    },
+    "The center area toggles controls. Double-click an image to preview it. Scroll a zoomed page to its edge, then start a new gesture to turn the page.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击中央切换操作栏，双击图片打开预览。放大页面滚动到边缘后，重新开始一次滚动手势即可翻页。"
+          }
+        }
+      }
+    },
+    "Add multiple shortcuts to an action, or remove them to leave it unbound. Escape cancels recording.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每个操作可添加多个快捷键，也可移除全部绑定。Esc 取消录入。"
+          }
+        }
+      }
+    },
+    "eHunter-style keys: A / D navigate pages, Q toggles controls, T toggles thumbnails, F opens the page overview. Standard macOS shortcuts are preserved.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "eHunter 风格快捷键：A／D 翻页，Q 切换操作栏，T 切换缩略图，F 打开页面总览。保留标准 macOS 快捷键。"
+          }
+        }
+      }
+    },
+    "This key combination is reserved for standard macOS navigation.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此组合键保留用于标准 macOS 导航。"
           }
         }
       }

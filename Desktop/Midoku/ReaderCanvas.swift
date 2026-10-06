@@ -2,249 +2,441 @@ import AppKit
 import MidokuCore
 import SwiftUI
 
+// All three reading layouts use the same native viewport and input rules.
 struct ReaderCanvas: NSViewRepresentable {
     @ObservedObject var session: ReaderSession
-    @EnvironmentObject private var shortcuts: ShortcutStore
     let background: NSColor
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeNSView(context: Context) -> ComicScrollView {
-        let scroll = ComicScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.borderType = .noBorder
-        scroll.documentView = ComicDocumentView()
-        return scroll
-    }
-
+    func makeNSView(context: Context) -> ComicScrollView { ComicScrollView(frame: .zero) }
     func updateNSView(_ scroll: ComicScrollView, context: Context) {
-        scroll.session = session
-        scroll.shortcuts = shortcuts.map
-        scroll.backgroundColor = background
-        session.window = scroll.window
-        guard let document = scroll.documentView as? ComicDocumentView, let book = session.book else { return }
-        document.session = session
-        document.pageBackground = background
-        let pages =
-            session.direction == .rightToLeft
-            ? session.position.visiblePages.reversed().map { $0 } : session.position.visiblePages
-        let urls = pages.compactMap { session.library.pageURL(for: book, at: $0) }
-        let coordinator = context.coordinator
-        if coordinator.urls != urls || coordinator.reloadToken != session.reloadToken {
-            coordinator.reloadToken = session.reloadToken
-            coordinator.urls = urls
-            coordinator.task?.cancel()
-            document.images = []
-            document.needsDisplay = true
-            coordinator.task = Task { @MainActor [weak scroll, weak document] in
-                do {
-                    var images: [NSImage] = []
-                    for url in urls {
-                        let preview = try await PageImages.shared.preview(for: url)
-                        try Task.checkCancellation()
-                        guard let image = preview.image() else { throw ImportFailure.empty }
-                        images.append(image)
-                    }
-                    guard let scroll, let document else { return }
-                    document.images = images
-                    scroll.layoutComic(resetPosition: true)
-                } catch is CancellationError {} catch {
-                    session.errorMessage = "A page could not be loaded: \(error.localizedDescription)"
-                }
-            }
-        }
-        scroll.layoutComic(resetPosition: false)
+        scroll.configure(session: session, background: background)
     }
-
-    static func dismantleNSView(_ nsView: ComicScrollView, coordinator: Coordinator) { coordinator.task?.cancel() }
-
-    @MainActor final class Coordinator {
-        var urls: [URL] = []
-        var reloadToken: UUID?
-        var task: Task<Void, Never>?
-    }
+    static func dismantleNSView(_ scroll: ComicScrollView, coordinator: ()) { scroll.stop() }
 }
 
+@MainActor
 final class ComicScrollView: NSScrollView {
     weak var session: ReaderSession?
-    var shortcuts = ShortcutMap()
-    var zoomAnchor: (fraction: NSPoint, viewport: NSPoint)?
+    private let comic = ComicDocumentView()
+    private var tasks: [Int: (UUID, Task<Void, Never>)] = [:]
+    private var boundsObserver: NSObjectProtocol?
+    private var revision: UUID?
+    private var reloadToken: UUID?
+    private var bookID: UUID?
+    private var paths: [String] = []
+    private var mode: PageLayout?
+    private var ordering: ReadingDirection?
+    private var layingOut = false
+    private var hasLayout = false
+    private var wheel = WheelTurnGate()
+    private var lastNavigation: TimeInterval = 0
+
     override var acceptsFirstResponder: Bool { true }
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        hasVerticalScroller = true
+        hasHorizontalScroller = true
+        autohidesScrollers = true
+        borderType = .noBorder
+        documentView = comic
+        comic.viewport = self
+        contentView.postsBoundsChangedNotifications = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(session: ReaderSession, background: NSColor) {
+        self.session = session
+        session.viewport = self
+        session.window = window
+        backgroundColor = background
+        comic.pageBackground = background
+        guard let book = session.book else { return }
+        let navigated = revision != session.navigationRevision
+        let reload = reloadToken != session.reloadToken
+        let structureChanged =
+            bookID != book.id || paths != book.pages || mode != session.position.layout
+            || ordering != session.direction
+        revision = session.navigationRevision
+        reloadToken = session.reloadToken
+        let pages: [Int]
+        if session.position.layout == .continuous {
+            pages = Array(book.pages.indices)
+        } else {
+            pages =
+                session.direction == .rightToLeft
+                ? Array(session.position.visiblePages.reversed()) : session.position.visiblePages
+        }
+        if structureChanged || comic.items.map(\.page) != pages || reload {
+            hasLayout = false
+            let old = Dictionary(uniqueKeysWithValues: comic.items.map { ($0.page, $0) })
+            for pending in tasks.values { pending.1.cancel() }
+            tasks = [:]
+            comic.cancelClick()
+            comic.items = pages.map { page in
+                if !reload, bookID == book.id, paths == book.pages, let previous = old[page] {
+                    return previous
+                }
+                return ComicPageItem(page: page, url: session.library.pageURL(for: book, at: page))
+            }
+            bookID = book.id
+            paths = book.pages
+            mode = session.position.layout
+            ordering = session.direction
+        }
+        layoutComic(resetPosition: navigated || structureChanged)
+        loadVisiblePages()
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
+        boundsObserver = nil
+        guard window != nil else {
+            stop()
+            return
+        }
         session?.window = window
+        boundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: contentView, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.scrolled() }
+        }
     }
-
+    func stop() {
+        comic.cancelClick()
+        for pending in tasks.values { pending.1.cancel() }
+        tasks = [:]
+        if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
+        boundsObserver = nil
+        if session?.viewport === self { session?.viewport = nil }
+        session?.saveProgress()
+    }
     override func layout() {
         super.layout()
         layoutComic(resetPosition: false)
+        loadVisiblePages()
+    }
+
+    private func anchor() -> (page: Int, fraction: Double) {
+        let top = contentView.bounds.minY
+        let active =
+            session?.position.layout == .continuous
+            ? comic.items.first(where: { $0.rect.maxY > top + 1 }) ?? comic.items.last
+            : comic.items.first(where: { $0.page == session?.position.page })
+        guard let item = active else {
+            return (session?.position.page ?? 0, session?.pageOffset ?? 0)
+        }
+        return (item.page, min(1, max(0, Double((top - item.rect.minY) / max(1, item.rect.height)))))
     }
 
     func layoutComic(resetPosition: Bool) {
-        guard let session, let document = documentView as? ComicDocumentView, !document.images.isEmpty else { return }
+        guard !layingOut, let session, !comic.items.isEmpty else { return }
         let viewport = contentView.bounds.size
-        let natural = document.naturalSize
-        guard viewport.width > 0, viewport.height > 0, natural.width > 0, natural.height > 0 else { return }
-        let scale: CGFloat
-        switch session.zoom {
-        case .page: scale = min((viewport.width - 32) / natural.width, (viewport.height - 32) / natural.height)
-        case .width: scale = (viewport.width - 32) / natural.width
-        case .actual: scale = 1
-        case .custom(let value): scale = value
-        }
-        let oldSize = document.frame.size
-        let center = CGPoint(
-            x: contentView.bounds.midX / max(1, oldSize.width), y: contentView.bounds.midY / max(1, oldSize.height))
-        document.scale = max(0.01, scale)
-        session.displayedScale = document.scale
-        let newSize = NSSize(
-            width: max(viewport.width, natural.width * document.scale + 32),
-            height: max(viewport.height, natural.height * document.scale + 32))
-        if oldSize != newSize { document.setFrameSize(newSize) }
-        if resetPosition {
-            zoomAnchor = nil
-            contentView.scroll(to: NSPoint(x: max(0, (document.frame.width - viewport.width) / 2), y: 0))
-        } else if oldSize != document.frame.size {
-            if let anchor = zoomAnchor {
-                contentView.scroll(
-                    to: NSPoint(
-                        x: anchor.fraction.x * document.frame.width - anchor.viewport.x,
-                        y: anchor.fraction.y * document.frame.height - anchor.viewport.y))
-                zoomAnchor = nil
-            } else {
-                contentView.scroll(
-                    to: NSPoint(
-                        x: center.x * document.frame.width - viewport.width / 2,
-                        y: center.y * document.frame.height - viewport.height / 2))
+        guard viewport.width > 32, viewport.height > 32 else { return }
+        layingOut = true
+        defer { layingOut = false }
+        let restoring = resetPosition || !hasLayout
+        let saved = restoring ? (page: session.position.page, fraction: session.pageOffset) : anchor()
+        let oldWidth = max(1, comic.frame.width)
+        let horizontal = contentView.bounds.midX / oldWidth
+        var totalWidth: CGFloat = viewport.width
+        var totalHeight: CGFloat = viewport.height
+        if session.position.layout == .continuous {
+            var y: CGFloat = 16
+            for i in comic.items.indices {
+                let size = comic.items[i].size
+                let scale: CGFloat
+                switch session.zoom {
+                case .page: scale = min(1000, viewport.width - 32) / size.width
+                case .width: scale = (viewport.width - 32) * session.widthRatio / size.width
+                case .actual: scale = 1
+                case .custom(let value): scale = value
+                }
+                let width = max(1, size.width * scale)
+                let height = max(1, size.height * scale)
+                comic.items[i].rect = NSRect(x: 0, y: y, width: width, height: height)
+                y += height + 12
+                totalWidth = max(totalWidth, width + 32)
+            }
+            totalHeight = max(totalHeight, y + 4)
+            for i in comic.items.indices {
+                comic.items[i].rect.origin.x = (totalWidth - comic.items[i].rect.width) / 2
+            }
+        } else {
+            let naturalWidth = comic.items.reduce(CGFloat(0)) { $0 + $1.size.width }
+            let naturalHeight = comic.items.map { $0.size.height }.max() ?? 1
+            let scale: CGFloat
+            switch session.zoom {
+            case .page:
+                scale = min((viewport.width - 32) / naturalWidth, (viewport.height - 32) / naturalHeight)
+            case .width: scale = (viewport.width - 32) * session.widthRatio / naturalWidth
+            case .actual: scale = 1
+            case .custom(let value): scale = value
+            }
+            totalWidth = max(totalWidth, naturalWidth * scale + 32)
+            totalHeight = max(totalHeight, naturalHeight * scale + 32)
+            var x = (totalWidth - naturalWidth * scale) / 2
+            for i in comic.items.indices {
+                let size = comic.items[i].size
+                comic.items[i].rect = NSRect(
+                    x: x, y: (totalHeight - size.height * scale) / 2,
+                    width: size.width * scale, height: size.height * scale)
+                x += size.width * scale
             }
         }
+        let newSize = NSSize(width: totalWidth, height: totalHeight)
+        let geometryChanged = comic.frame.size != newSize
+        if geometryChanged { comic.setFrameSize(newSize) }
+        if restoring || geometryChanged {
+            if let item = comic.items.first(where: { $0.page == saved.page }) {
+                let x =
+                    restoring
+                    ? (totalWidth - viewport.width) / 2 : horizontal * totalWidth - viewport.width / 2
+                scrollTo(
+                    x: x,
+                    y: item.rect.minY + CGFloat(saved.fraction) * item.rect.height
+                        - (saved.fraction == 0 ? 16 : 0))
+            }
+        }
+        hasLayout = true
+        if let item = comic.items.first { session.displayedScale = item.rect.width / item.size.width }
+        comic.needsDisplay = true
         reflectScrolledClipView(contentView)
-        document.needsDisplay = true
-        document.window?.invalidateCursorRects(for: document)
     }
 
-    override func keyDown(with event: NSEvent) {
-        let binding = KeyBinding(event: event)
-        if let action = shortcuts.action(for: binding) {
-            session?.perform(action)
+    private func scrollTo(x: CGFloat, y: CGFloat) {
+        contentView.scroll(
+            to: NSPoint(
+                x: min(max(0, x), max(0, comic.frame.width - contentView.bounds.width)),
+                y: min(max(0, y), max(0, comic.frame.height - contentView.bounds.height))))
+        reflectScrolledClipView(contentView)
+    }
+    func scrollScreen(forward: Bool) {
+        scrollTo(
+            x: contentView.bounds.minX,
+            y: contentView.bounds.minY + (forward ? 1 : -1) * contentView.bounds.height * 0.9)
+        scrolled()
+    }
+    private func scrolled() {
+        guard !layingOut, window != nil else { return }
+        loadVisiblePages()
+        let current = anchor()
+        session?.didScroll(
+            page: current.page, offset: current.fraction,
+            reachedEnd: contentView.bounds.maxY >= comic.frame.height - 2)
+    }
+
+    private func loadVisiblePages() {
+        guard window != nil, !layingOut else { return }
+        let range = contentView.bounds.insetBy(dx: 0, dy: -contentView.bounds.height)
+        let wanted = Set(comic.items.filter { $0.rect.intersects(range) }.map(\.page))
+        for page in Array(tasks.keys) where !wanted.contains(page) {
+            tasks.removeValue(forKey: page)?.1.cancel()
+        }
+        // Release distant decoded images while retaining their measured geometry.
+        for i in comic.items.indices where !wanted.contains(comic.items[i].page) {
+            comic.items[i].image = nil
+        }
+        for item in comic.items where wanted.contains(item.page) && item.image == nil && !item.failed {
+            guard tasks.count < 4 else { break }
+            guard tasks[item.page] == nil, let url = item.url else { continue }
+            let page = item.page
+            let token = UUID()
+            let task = Task { @MainActor [weak self] in
+                do {
+                    let preview = try await PageImages.shared.preview(for: url)
+                    try Task.checkCancellation()
+                    guard let image = preview.image(), image.size.width > 0, image.size.height > 0 else {
+                        throw ImportFailure.empty
+                    }
+                    guard let self, self.tasks[page]?.0 == token,
+                        let index = self.comic.items.firstIndex(where: { $0.page == page })
+                    else { return }
+                    self.comic.items[index].image = image
+                    self.comic.items[index].size = image.size
+                } catch is CancellationError {} catch {
+                    guard let self, self.tasks[page]?.0 == token,
+                        let index = self.comic.items.firstIndex(where: { $0.page == page })
+                    else { return }
+                    self.comic.items[index].failed = true
+                }
+                guard let self, self.tasks[page]?.0 == token else { return }
+                self.tasks[page] = nil
+                self.layoutComic(resetPosition: false)
+                self.scrolled()
+            }
+            tasks[page] = (token, task)
+        }
+    }
+    func click(at point: NSPoint) {
+        guard let session else { return }
+        let fraction = Double((point.x - contentView.bounds.minX) / max(1, contentView.bounds.width))
+        let enabled = UserDefaults.standard.object(forKey: "reader.clickToTurn") as? Bool ?? true
+        let action = ReaderInputPolicy.click(
+            at: fraction, direction: session.direction, layout: session.position.layout,
+            enabled: enabled, swapSides: UserDefaults.standard.bool(forKey: "reader.swapClickSides"))
+        switch action {
+        case .controls: session.perform(.toggleChrome)
+        case .next: session.perform(.nextPage)
+        case .previous: session.perform(.previousPage)
+        }
+    }
+    func preview(at point: NSPoint) {
+        if let page = comic.items.first(where: { $0.rect.contains(point) })?.page {
+            session?.previewPage = page
+        }
+    }
+    func retry(at point: NSPoint) -> Bool {
+        guard let index = comic.items.firstIndex(where: { $0.failed && $0.rect.contains(point) }) else {
+            return false
+        }
+        comic.items[index].failed = false
+        loadVisiblePages()
+        return true
+    }
+    override func scrollWheel(with event: NSEvent) {
+        guard let session else {
+            super.scrollWheel(with: event)
             return
         }
-        if binding.modifiers.isEmpty {
-            if event.keyCode == 123 {
-                session?.horizontalArrow(left: true)
-                return
-            }
-            if event.keyCode == 124 {
-                session?.horizontalArrow(left: false)
-                return
-            }
+        if event.modifierFlags.contains(.command) {
+            session.zoom = .custom(
+                min(8, max(0.05, session.displayedScale * exp(event.scrollingDeltaY / 100))))
+            return
         }
-        super.keyDown(with: event)
-    }
-
-    override func scrollWheel(with event: NSEvent) {
-        // Normal wheel/trackpad input scrolls. Command-wheel zooms instead of
-        // accidentally turning a page; trackpad pinch uses the same zoom model.
-        if event.modifierFlags.contains(.command), let session {
-            session.zoom = .custom(min(8, max(0.01, session.displayedScale * exp(event.scrollingDeltaY / 100))))
-        } else {
+        if session.position.layout == .continuous {
+            wheel.reset()
             super.scrollWheel(with: event)
+            return
+        }
+        // Positive here means scrolling down in content coordinates, regardless
+        // of the user's macOS natural-scrolling preference.
+        let delta = -event.scrollingDeltaY
+        let rect = contentView.bounds
+        let canScroll = delta > 0 ? rect.maxY < comic.frame.height - 1 : rect.minY > 1
+        let horizontal = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        if horizontal {
+            super.scrollWheel(with: event)
+            return
+        }
+        let turn = wheel.consume(
+            delta: Double(delta), time: event.timestamp, precise: event.hasPreciseScrollingDeltas,
+            began: event.phase.contains(.began), ended: event.phase.contains(.ended),
+            momentum: event.momentumPhase != [], canScroll: canScroll, phased: event.phase != [])
+        if canScroll {
+            super.scrollWheel(with: event)
+            return
+        }
+        if let turn, event.timestamp - lastNavigation > 0.22 {
+            lastNavigation = event.timestamp
+            // Reversal is for wheel paging of fitted pages; a tall/zoomed page
+            // advances in its scroll direction once a new boundary gesture starts.
+            let reversed =
+                comic.frame.height <= contentView.bounds.height + 1
+                && UserDefaults.standard.bool(forKey: "reader.reverseWheelPaging")
+            session.perform((turn > 0) != reversed ? .nextPage : .previousPage)
         }
     }
-
     override func magnify(with event: NSEvent) {
         guard let session else { return }
-        session.zoom = .custom(min(8, max(0.01, session.displayedScale * (1 + event.magnification))))
+        session.zoom = .custom(min(8, max(0.05, session.displayedScale * (1 + event.magnification))))
     }
 }
 
-final class ComicDocumentView: NSView {
-    weak var session: ReaderSession?
+private struct ComicPageItem {
+    let page: Int
+    let url: URL?
+    var image: NSImage?
+    var size = NSSize(width: 1000, height: 1400)
+    var rect = NSRect.zero
+    var failed = false
+}
+
+@MainActor
+private final class ComicDocumentView: NSView {
+    weak var viewport: ComicScrollView?
+    var items: [ComicPageItem] = []
     var pageBackground = NSColor.black
-    var images: [NSImage] = []
-    var scale: CGFloat = 1
-    private var dragStart: NSPoint?
-    private var initialOrigin: NSPoint = .zero
+    private var press: ReaderClickCandidate?
+    private var pendingClick: Task<Void, Never>?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
-
-    var naturalSize: NSSize {
-        NSSize(width: images.reduce(0) { $0 + $1.size.width }, height: images.map(\.size.height).max() ?? 0)
-    }
-
     override func draw(_ dirtyRect: NSRect) {
         pageBackground.setFill()
-        bounds.fill()
-        let size = naturalSize
-        var x = max(16, (bounds.width - size.width * scale) / 2)
-        for image in images {
-            let height = image.size.height * scale
-            let rect = NSRect(
-                x: x, y: max(16, (bounds.height - height) / 2), width: image.size.width * scale, height: height)
-            image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            x += rect.width
-        }
-        if images.isEmpty {
-            (String(localized: "Loading page…") as NSString).draw(
-                at: NSPoint(x: 24, y: 24), withAttributes: [.foregroundColor: NSColor.secondaryLabelColor])
-        }
-    }
-
-    override func resetCursorRects() {
-        if let scroll = enclosingScrollView,
-            frame.width > scroll.contentSize.width + 1 || frame.height > scroll.contentSize.height + 1
-        {
-            addCursorRect(visibleRect, cursor: .openHand)
+        dirtyRect.fill()
+        for item in items where item.rect.intersects(dirtyRect) {
+            if let image = item.image {
+                image.draw(
+                    in: item.rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+                    hints: nil)
+            } else {
+                let text =
+                    item.failed
+                    ? String(localized: "Page could not be decoded. Click to retry.")
+                    : String(localized: "Loading page…")
+                (text as NSString).draw(
+                    at: NSPoint(x: item.rect.minX + 16, y: max(visibleRect.minY + 24, item.rect.minY + 24)),
+                    withAttributes: [.foregroundColor: NSColor.secondaryLabelColor])
+            }
         }
     }
-
+    func cancelClick() {
+        pendingClick?.cancel()
+        pendingClick = nil
+    }
     override func mouseDown(with event: NSEvent) {
-        guard let scroll = enclosingScrollView as? ComicScrollView else { return }
-        window?.makeFirstResponder(scroll)
-        if event.clickCount == 2 {
-            let point = convert(event.locationInWindow, from: nil)
-            scroll.zoomAnchor = (
-                NSPoint(x: point.x / max(1, frame.width), y: point.y / max(1, frame.height)),
-                NSPoint(x: point.x - scroll.contentView.bounds.minX, y: point.y - scroll.contentView.bounds.minY)
-            )
-            session?.zoom = session?.zoom == .actual ? .page : .actual
+        window?.makeFirstResponder(viewport)
+        cancelClick()
+        press = ReaderClickCandidate(x: event.locationInWindow.x, y: event.locationInWindow.y)
+    }
+    override func mouseDragged(with event: NSEvent) {
+        press?.move(x: event.locationInWindow.x, y: event.locationInWindow.y)
+        if press?.isClick == false { cancelClick() }
+    }
+    override func mouseUp(with event: NSEvent) {
+        defer { press = nil }
+        guard press?.isClick == true else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if viewport?.retry(at: point) == true { return }
+        if event.clickCount >= 2 {
+            cancelClick()
+            viewport?.preview(at: point)
             return
         }
-        dragStart = event.locationInWindow
-        initialOrigin = scroll.contentView.bounds.origin
+        pendingClick = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(NSEvent.doubleClickInterval)) } catch { return }
+            guard let self, self.window?.isKeyWindow == true, self.window?.attachedSheet == nil else {
+                return
+            }
+            self.viewport?.click(at: point)
+        }
     }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let start = dragStart, let scroll = enclosingScrollView else { return }
-        NSCursor.closedHand.set()
-        let delta = NSPoint(x: event.locationInWindow.x - start.x, y: event.locationInWindow.y - start.y)
-        scroll.contentView.scroll(to: NSPoint(x: initialOrigin.x - delta.x, y: initialOrigin.y + delta.y))
-        scroll.reflectScrolledClipView(scroll.contentView)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        dragStart = nil
-        window?.invalidateCursorRects(for: self)
-    }
-
     override func menu(for event: NSEvent) -> NSMenu? {
+        cancelClick()
         let menu = NSMenu()
+        let point = convert(event.locationInWindow, from: nil)
+        if let page = items.first(where: { $0.rect.contains(point) })?.page {
+            let preview = NSMenuItem(
+                title: String(localized: "Preview Image"), action: #selector(openPreview(_:)),
+                keyEquivalent: "")
+            preview.target = self
+            preview.representedObject = page
+            menu.addItem(preview)
+        }
         for action in [ReaderAction.nextPage, .previousPage, .fitPage, .fitWidth, .actualSize] {
-            let item = NSMenuItem(title: action.title, action: #selector(performMenuAction(_:)), keyEquivalent: "")
-            item.representedObject = action.rawValue
+            let item = NSMenuItem(
+                title: action.title, action: #selector(performAction(_:)), keyEquivalent: "")
             item.target = self
+            item.representedObject = action.rawValue
             menu.addItem(item)
         }
         return menu
     }
-
-    @objc private func performMenuAction(_ sender: NSMenuItem) {
-        guard let value = sender.representedObject as? String, let action = ReaderAction(rawValue: value) else {
-            return
-        }
-        session?.perform(action)
+    @objc private func openPreview(_ sender: NSMenuItem) {
+        viewport?.session?.previewPage = sender.representedObject as? Int
+    }
+    @objc private func performAction(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let action = ReaderAction(rawValue: raw)
+        else { return }
+        viewport?.session?.perform(action)
     }
 }

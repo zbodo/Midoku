@@ -9,6 +9,7 @@ public struct ComicBook: Identifiable, Codable, Equatable, Sendable {
     public let importedAt: Date
     public var lastReadAt: Date?
     public var currentPage: Int
+    public var pageOffset: Double?
     public var isRead: Bool
     public var isFavorite: Bool
     public var collection: String?
@@ -56,6 +57,7 @@ public enum LibraryPersistence {
         guard Set(snapshot.books.map(\.id)).count == snapshot.books.count,
             snapshot.books.allSatisfy({ book in
                 !book.pages.isEmpty && book.currentPage >= 0 && book.currentPage < book.pages.count
+                    && (book.pageOffset.map { $0.isFinite && (0...1).contains($0) } ?? true)
                     && book.pages.allSatisfy { PageCatalog.isSafeRelativePath($0) }
             })
         else { throw LibraryError.invalidPagePath }

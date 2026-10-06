@@ -56,9 +56,10 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func saveProgress(_ id: UUID, page: Int, finished: Bool = false) {
+    func saveProgress(_ id: UUID, page: Int, finished: Bool = false, offset: Double = 0) {
         updateBook(id) {
             $0.currentPage = min(max(0, page), max(0, $0.pages.count - 1))
+            $0.pageOffset = min(1, max(0, offset))
             $0.lastReadAt = Date()
             $0.isRead = $0.isRead || finished
         }

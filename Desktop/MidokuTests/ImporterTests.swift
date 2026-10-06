@@ -151,4 +151,45 @@ final class ImporterTests: XCTestCase {
         XCTAssertTrue(broken.loadFailed)
         XCTAssertEqual(try Data(contentsOf: index), corrupted)
     }
+    @MainActor
+    func testReaderAliasesRepeatAndPositionRestoreAreWindowLocal() throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = LibraryStore(root: root)
+        let book = ComicBook(title: "Long pages", pages: ["0.png", "1.png", "2.png"], sourceIdentity: "fixture")
+        library.commit { $0.books.append(book) }
+        let first = ReaderSession(book: book, library: library)
+        let second = ReaderSession(book: book, library: library)
+        let previousLayout = UserDefaults.standard.object(forKey: "desktop.layout")
+        defer {
+            if let previousLayout {
+                UserDefaults.standard.set(previousLayout, forKey: "desktop.layout")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "desktop.layout")
+            }
+        }
+        first.setLayout(.single)
+        second.setLayout(.single)
+        let shortcuts = ShortcutMap()
+        XCTAssertTrue(first.handleKey(.init(key: "q"), shortcuts: shortcuts, repeatEvent: false))
+        XCTAssertFalse(first.chromeVisible)
+        XCTAssertTrue(second.chromeVisible)
+        XCTAssertTrue(first.handleKey(.init(key: "q"), shortcuts: shortcuts, repeatEvent: true))
+        XCTAssertFalse(first.chromeVisible)
+        XCTAssertTrue(first.handleKey(.init(key: "d"), shortcuts: shortcuts, repeatEvent: false))
+        XCTAssertEqual(first.position.page, 1)
+        XCTAssertEqual(second.position.page, 0)
+        first.setLayout(.continuous)
+        first.didScroll(page: 1, offset: 0.6, reachedEnd: false)
+        first.saveProgress()
+        let persisted = try LibraryPersistence.load(from: root.appendingPathComponent("library.json"))
+        let stored = try XCTUnwrap(persisted.books.first)
+        XCTAssertEqual(stored.currentPage, 1)
+        XCTAssertEqual(stored.pageOffset, 0.6)
+        let reopened = ReaderSession(book: stored, library: library)
+        XCTAssertEqual(reopened.pageOffset, 0.6)
+        XCTAssertEqual(reopened.position.page, 1)
+        XCTAssertFalse(stored.isRead)
+    }
+
 }

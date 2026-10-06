@@ -86,14 +86,14 @@ final class ShortcutTests: XCTestCase {
         let binding = KeyBinding(key: "N", modifiers: .option)
         try shortcuts.assign(binding, to: .nextPage)
         XCTAssertEqual(shortcuts.action(for: binding), .nextPage)
-        XCTAssertNil(shortcuts.action(for: ShortcutMap.defaults[.nextPage]!))
+        XCTAssertNil(shortcuts.action(for: ShortcutMap.defaults[.nextPage]!.first!))
         XCTAssertThrowsError(try shortcuts.assign(binding, to: .previousPage)) { error in
             XCTAssertEqual(error as? ShortcutError, .conflict(.nextPage))
         }
         let roundTrip = try JSONDecoder().decode(ShortcutMap.self, from: JSONEncoder().encode(shortcuts))
         XCTAssertEqual(roundTrip, shortcuts)
         shortcuts.reset()
-        XCTAssertEqual(shortcuts.binding(for: .nextPage), ShortcutMap.defaults[.nextPage])
+        XCTAssertEqual(shortcuts.bindings(for: .nextPage), ShortcutMap.defaults[.nextPage])
     }
 
     func testProtectsSystemKeys() {
@@ -106,15 +106,41 @@ final class ShortcutTests: XCTestCase {
 
     func testDefaultsHaveNoCollisions() {
         let map = ShortcutMap()
-        XCTAssertEqual(Set(ReaderAction.allCases.map { map.binding(for: $0) }).count, ReaderAction.allCases.count)
+        let bindings = ReaderAction.allCases.flatMap { map.bindings(for: $0) }
+        XCTAssertEqual(Set(bindings).count, bindings.count)
     }
 
-    func testRejectsArrowKeysAndMultipleCharacters() {
+    func testArrowKeysAreCustomizableAndMultipleCharactersRejected() throws {
         var map = ShortcutMap()
-        for key in ["\u{f700}", "\u{f701}", "\u{f702}", "\u{f703}", "next"] {
-            XCTAssertThrowsError(try map.assign(.init(key: key), to: .nextPage))
-        }
+        map.unbind(.nextPage)
+        try map.add(.init(key: "\u{f703}"), to: .previousPage)
+        XCTAssertEqual(map.action(for: .init(key: "\u{f703}")), .previousPage)
+        XCTAssertThrowsError(try map.assign(.init(key: "next"), to: .nextPage))
     }
+
+    func testMultipleBindingsUnbindAndPersistence() throws {
+        var map = ShortcutMap()
+        try map.add(.init(key: "n"), to: .nextPage)
+        XCTAssertEqual(map.action(for: .init(key: "d")), .nextPage)
+        XCTAssertEqual(map.action(for: .init(key: "n")), .nextPage)
+        map.remove(.init(key: "d"), from: .nextPage)
+        XCTAssertNil(map.action(for: .init(key: "d")))
+        map.unbind(.toggleOverview)
+        let roundTrip = try JSONDecoder().decode(ShortcutMap.self, from: JSONEncoder().encode(map))
+        XCTAssertEqual(roundTrip, map)
+        XCTAssertNil(roundTrip.binding(for: .toggleOverview))
+        XCTAssertNil(roundTrip.action(for: .init(key: "f")))
+    }
+
+    func testLegacyOverridesWinOverNewDefaults() throws {
+        struct Legacy: Encodable { let overrides: [ReaderAction: KeyBinding] }
+        let bytes = try JSONEncoder().encode(Legacy(overrides: [.toggleChrome: .init(key: "t")]))
+        let map = try JSONDecoder().decode(ShortcutMap.self, from: bytes)
+        XCTAssertEqual(map.action(for: .init(key: "t")), .toggleChrome)
+        XCTAssertTrue(map.bindings(for: .toggleThumbnails).isEmpty)
+        XCTAssertEqual(map.action(for: .init(key: "d")), .nextPage)
+    }
+
 }
 
 final class PersistenceTests: XCTestCase {

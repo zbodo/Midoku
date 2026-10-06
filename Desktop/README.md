@@ -73,29 +73,52 @@ source preserves chapter records and cached images.
   Arrows navigate the grid, Return or double-click opens the reader.
 - Different chapters/books have independent, resizable reader windows. Closing
   one leaves the library and other readers open.
-- Single pages, spreads with optional single cover, and continuous reading are
-  available. Explicit edge buttons turn pages. Drag zoomed pages to pan;
-  double-click toggles actual size/fit at the clicked point. Wheel scrolls,
-  ⌘-wheel and pinch zoom in the AppKit canvas.
-- ←/→ follow reading direction; Space advances, Shift-Space goes back. Settings
-  → Keyboard records shortcuts, validates conflicts and saves assignments.
-  Search fields, sheets and Settings retain normal macOS text input shortcuts.
+- Single pages, spreads with optional single cover, and continuous reading use
+  the same AppKit scrolling viewport. Click the outer 37.5% areas to turn pages;
+  the center toggles controls. Sides follow reading direction. Continuous mode
+  clicks only toggle controls. Dragging cancels a click and never pans the page.
+- Double-click the actual image to open a separate image-preview sheet; its
+  zoom controls do not alter the reading position. Right-click offers preview,
+  navigation and fit actions. Failed pages can be clicked to retry.
+- The wheel turns fitted pages. On tall/zoomed pages it scrolls within the page;
+  reaching an edge needs a new gesture to turn. Trackpad momentum cannot turn
+  additional pages. Continuous mode always scrolls. Command-wheel and pinch
+  zoom the main viewport; optional reverse wheel paging only affects fitted pages.
+- The eHunter-style defaults bind A / Left / Up to previous page and D / Right /
+  Down to next page/group. Space / Shift-Space (also Page Down / Page Up) scroll
+  90% of a viewport in continuous mode and turn pages in paged mode. Q toggles
+  controls, T thumbnails, F a thumbnail overview, R reading settings, and [ / ]
+  adjust fit-width by five percentage points. Control-Command-F is native full screen.
+- Settings → Keyboard supports multiple aliases, removal/unbinding, conflicts
+  and restoring defaults. Existing customized bindings migrate and take priority
+  over new defaults. Optional directional left/right arrows only affect keys
+  assigned to page navigation. Escape closes panels or reveals controls; text
+  input, native controls and sheets retain their own keyboard handling.
+- Page index and relative page offset are saved, including long-image positions.
+  Continuous pages load near the viewport and release distant decoded images.
+  Changing window size, controls or zoom preserves the current page anchor.
+- The first reader shows a dismissible controls popover; the question-mark
+  toolbar button opens it again. Reading Settings includes click paging, side
+  swapping, wheel reversal and directional-arrow options.
 
 ## Architecture and dependencies
 
 `Desktop/Core` is a dependency-free Swift package for versioned/atomic library
 persistence, modern repository parsing, online chapter identities, validated
-page paths, spread navigation and shortcut validation.
+page paths, spread navigation, click/drag/wheel input policies and versioned
+multi-binding shortcut validation.
 
 `Desktop/Midoku` owns native scenes, library/import services, source management,
-reader sessions, the AppKit canvas and ImageIO previews. `SourceService` hosts
+reader sessions, the AppKit viewport and ImageIO previews. `SourceService` hosts
 **AidokuRunner**, pinned to `cc4d06ff399e7169b9c647bccede7cb29bc805c6`, and
 `RemotePageCache` preserves source image requests and processing contexts.
 ZIPFoundation **0.9.20** and the runner's Wasm3/SwiftSoup/SwiftLint dependencies
 are locked in the desktop project's `Package.resolved`. SwiftLint's upstream
 package build plugin is enabled; CI skips its interactive trust prompt.
 Archive work and previews run through actor services. Display previews are
-bounded to 4,000 pixels and cached within 64 MB; originals are kept. Animated
+bounded to 4,000 pixels (8,192 in the separate detail preview) and cached
+within 64 MB; originals are kept. This preview is not a full-resolution tiled
+image viewer. Animated
 images display their first frame.
 
 The old `Aidoku/` and `Aidoku.xcodeproj` are reference code and are not linked
@@ -117,7 +140,7 @@ The macOS workflow runs both checks; nightly builds create an unsigned app ZIP.
 Distribution signing/notarization is not configured. Workflow definitions do
 not establish that CI has already passed.
 
-Development in the cloud uses Linux: **21 portable tests passed**; Swift syntax,
+Development in the cloud uses Linux: **30 portable tests passed**; Swift syntax,
 project references, property lists and workflow configuration were checked.
 The complete dependency graph also resolved successfully using the locked
 versions with `--force-resolved-versions`.
@@ -131,7 +154,10 @@ pinned runner checkout. These tests are configured but need a macOS run.
 Before release, run the command above and verify an actual modern repository:
 install/update a source, browse multiple search pages, read a protected chapter,
 complete sign-in and retry, restart with a partial and a fully cached chapter,
-then uninstall/reinstall the source. Also test simultaneous readers, panning,
-zoom, RTL/LTR spread boundaries, continuous scrolling, shortcuts, shelf multi-
-selection, resizing and VoiceOver. Website network access requires the chosen
+then uninstall/reinstall the source. The previous baseline was reported to
+compile and launch on the user's Mac; this reader refactor still requires a
+macOS build and interactive checks. Verify simultaneous readers, RTL/LTR click
+zones, drag cancellation, double-click without a stray turn, tall-page boundary
+scrolling, trackpad inertia, continuous position restoration, shortcut migration,
+text-field focus, resizing and VoiceOver. Website network access requires the chosen
 source's repository, API and image hosts to be allowed by the cloud environment.

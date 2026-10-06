@@ -69,6 +69,13 @@ private struct DesktopCommands: Commands {
     @FocusedValue(\.readerSession) private var reader
     @Environment(\.openWindow) private var openWindow
 
+    private var readerAcceptsCommands: Bool {
+        guard let window = reader?.window, window.isKeyWindow, window.attachedSheet == nil,
+            NSApp.modalWindow == nil
+        else { return false }
+        return !(window.firstResponder is NSTextView) && !(window.firstResponder is NSControl)
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("Import Comics…") { library.importPanel() }
@@ -80,13 +87,15 @@ private struct DesktopCommands: Commands {
         CommandMenu("Reading") {
             ForEach(ReaderAction.allCases, id: \.self) { action in
                 let binding = shortcuts.map.binding(for: action)
-                if !binding.modifiers.intersection([.command, .control]).isEmpty {
+                if let binding, !binding.modifiers.intersection([.command, .control]).isEmpty {
                     Button(action.title) { reader?.perform(action) }
                         .keyboardShortcut(binding.equivalent, modifiers: binding.eventModifiers)
-                        .disabled(reader == nil)
+                        .disabled(!readerAcceptsCommands)
                 } else {
-                    Button("\(action.title)    \(binding.display)") { reader?.perform(action) }
-                        .disabled(reader == nil)
+                    Button(
+                        "\(action.title)    \(shortcuts.map.bindings(for: action).map(\.display).joined(separator: ", "))"
+                    ) { reader?.perform(action) }
+                    .disabled(!readerAcceptsCommands)
                 }
             }
         }
