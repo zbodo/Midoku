@@ -2784,6 +2784,36 @@
           }
         }
       }
+    },
+    "Close Reader": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭阅读窗口"
+          }
+        }
+      }
+    },
+    "Open Chapter Website": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开章节网页"
+          }
+        }
+      }
+    },
+    "Chapter Website": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "章节网页"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

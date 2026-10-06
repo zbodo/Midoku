@@ -59,6 +59,14 @@ final class ReaderSession: ObservableObject {
 
     var book: ComicBook? { library.book(bookID) }
     var title: String { book?.title ?? String(localized: "Reader") }
+    var chapterWebsiteURL: URL? {
+        guard let reference = book?.online,
+            let chapter = try? JSONDecoder().decode(AidokuRunner.Chapter.self, from: reference.chapterData),
+            let url = chapter.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+        else { return nil }
+        return url
+    }
+
     var pageLabel: String {
         let pages = position.visiblePages
         let visible = pages.count > 1 ? "\(pages[0] + 1)–\(pages[pages.count - 1] + 1)" : "\(position.page + 1)"

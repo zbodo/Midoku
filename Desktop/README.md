@@ -113,7 +113,11 @@ and cached images.
   Reduce Motion skips the sliding animation.
 - Top controls and progress float over the unchanged viewport, using native
   Liquid Glass on macOS 26+ and material on earlier macOS. Turns hide controls
-  automatically; the center area or Q restores them.
+  automatically; the center area or Q restores them. The top bar follows
+  Aidoku: close and chapter navigation on the left, a centered manga/chapter
+  title, and chapter website plus reading settings on the right. Local books
+  use the list button for thumbnails. Layout, overview, zoom and help live in
+  Reading Settings rather than crowding the top bar.
 - Adaptive paging and continuous reading use
   the same AppKit scrolling viewport. Click the outer 37.5% areas to turn pages;
   the center toggles controls. Sides follow reading direction. Continuous mode
