@@ -1,3 +1,7 @@
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
+
 import Foundation
 
 public enum ReadingDirection: String, Codable, CaseIterable, Sendable {
