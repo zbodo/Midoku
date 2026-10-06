@@ -82,9 +82,12 @@ private struct SourceFilterRow: View {
         switch filter.value {
         case .note(let note): Text(note).foregroundStyle(.secondary)
         case .text(let placeholder):
-            TextField(placeholder ?? title, text: Binding(get: text, set: { value = .text(id: filter.id, value: $0) }))
+            TextField(
+                placeholder ?? title, text: Binding(get: { text() }, set: { value = .text(id: filter.id, value: $0) }))
         case .check(let name, let canExclude, _):
-            Picker(name ?? title, selection: Binding(get: check, set: { value = .check(id: filter.id, value: $0) })) {
+            Picker(
+                name ?? title, selection: Binding(get: { check() }, set: { value = .check(id: filter.id, value: $0) })
+            ) {
                 Text("Any").tag(0)
                 Text("Include").tag(1)
                 if canExclude { Text("Exclude").tag(2) }
@@ -92,7 +95,8 @@ private struct SourceFilterRow: View {
         case .select(let select):
             Picker(
                 title,
-                selection: Binding(get: selected, set: { value = $0.isEmpty ? nil : .select(id: filter.id, value: $0) })
+                selection: Binding(
+                    get: { selected() }, set: { value = $0.isEmpty ? nil : .select(id: filter.id, value: $0) })
             ) {
                 Text("Any").tag("")
                 ForEach(select.options.indices, id: \.self) { index in

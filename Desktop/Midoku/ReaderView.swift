@@ -189,7 +189,9 @@ struct ReaderWindowView: View {
                         Image(systemName: "list.bullet")
                     }.help("Chapters")
                 }
-                Picker("Page Layout", selection: Binding(get: { session.position.layout }, set: session.setLayout)) {
+                Picker(
+                    "Page Layout", selection: Binding(get: { session.position.layout }, set: { session.setLayout($0) })
+                ) {
                     Text("Single Page").tag(PageLayout.single)
                     Text("Two Pages").tag(PageLayout.spread)
                     Text("Continuous").tag(PageLayout.continuous)
@@ -201,7 +203,7 @@ struct ReaderWindowView: View {
                     }
                     Toggle(
                         "Single Cover Page",
-                        isOn: Binding(get: { session.position.coverIsSingle }, set: session.setSingleCover))
+                        isOn: Binding(get: { session.position.coverIsSingle }, set: { session.setSingleCover($0) }))
                     Divider()
                     ForEach([ReaderAction.fitPage, .fitWidth, .actualSize, .zoomIn, .zoomOut], id: \.self) { action in
                         Button(action.title) { session.perform(action) }

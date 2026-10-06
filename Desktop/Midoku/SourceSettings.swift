@@ -58,7 +58,10 @@ private struct SourceSettingRow: View {
         if let requires = setting.requiresFalse, matches(requires) { return false }
         return true
     }
-    private func binding<T>(_ get: @escaping () -> T, _ set: @escaping (T) -> Void) -> Binding<T> {
+    private func binding<T>(
+        _ get: @escaping @MainActor @Sendable () -> T,
+        _ set: @escaping @MainActor @Sendable (T) -> Void
+    ) -> Binding<T> {
         Binding(
             get: get,
             set: { value in

@@ -59,46 +59,7 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $shelf) {
-                Section("Library") {
-                    Label("All Comics", systemImage: "books.vertical").tag(Shelf.all)
-                    Label("Continue Reading", systemImage: "book").tag(Shelf.reading)
-                    Label("Favorites", systemImage: "star").tag(Shelf.favorites)
-                    Label("Finished", systemImage: "checkmark.circle").tag(Shelf.finished)
-                }
-                Section("Collections") {
-                    ForEach(library.snapshot.collections, id: \.self) { name in
-                        Label(name, systemImage: "folder").tag(Shelf.collection(name))
-                            .contextMenu {
-                                Button("Delete Collection", role: .destructive) {
-                                    library.commit { snapshot in
-                                        snapshot.collections.removeAll { $0 == name }
-                                        for index in snapshot.books.indices
-                                        where snapshot.books[index].collection == name {
-                                            snapshot.books[index].collection = nil
-                                        }
-                                    }
-                                    shelf = .all
-                                }
-                            }
-                    }
-                    Button {
-                        creatingCollection = true
-                    } label: {
-                        Label("New Collection…", systemImage: "folder.badge.plus")
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 300)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    Text("\(library.books.count) comics").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    if library.isImporting { ProgressView().controlSize(.small) }
-                }.padding(12)
-            }
+            sidebar
         } detail: {
             HStack(spacing: 0) {
                 shelfContent
@@ -188,6 +149,52 @@ struct LibraryView: View {
         } message: {
             Text(library.errorMessage ?? "")
         }
+    }
+
+    private var sidebar: some View {
+        List(selection: $shelf) {
+            Section("Library") {
+                Label("All Comics", systemImage: "books.vertical").tag(Shelf.all)
+                Label("Continue Reading", systemImage: "book").tag(Shelf.reading)
+                Label("Favorites", systemImage: "star").tag(Shelf.favorites)
+                Label("Finished", systemImage: "checkmark.circle").tag(Shelf.finished)
+            }
+            Section("Collections") {
+                ForEach(library.snapshot.collections, id: \.self) { name in
+                    Label(name, systemImage: "folder").tag(Shelf.collection(name))
+                        .contextMenu {
+                            Button("Delete Collection", role: .destructive) {
+                                deleteCollection(name)
+                            }
+                        }
+                }
+                Button {
+                    creatingCollection = true
+                } label: {
+                    Label("New Collection…", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .listStyle(.sidebar)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 300)
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Text("\(library.books.count) comics").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if library.isImporting { ProgressView().controlSize(.small) }
+            }.padding(12)
+        }
+    }
+
+    private func deleteCollection(_ name: String) {
+        library.commit { (snapshot: inout LibrarySnapshot) in
+            snapshot.collections.removeAll { (collection: String) in collection == name }
+            for index in snapshot.books.indices where snapshot.books[index].collection == name {
+                snapshot.books[index].collection = nil
+            }
+        }
+        shelf = .all
     }
 
     @ViewBuilder private var shelfContent: some View {
